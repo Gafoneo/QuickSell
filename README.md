@@ -13,7 +13,7 @@ There is specific information on each command and its usage in the in-game docum
 
 - `/sell help [page]` to open general or specific help page
 
--`/sell help pages` to open a list of all help pages
+- `/sell help pages` to open a list of all help pages
 
 - `/sell item [item]` to sell all items like the one you are holding or the one you specified
 
