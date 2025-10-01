@@ -1,5 +1,8 @@
 # QuickSell
 
+## Description:
+
+Allows you to sell scrap on company using chat commands. Now off the main thread so should not lag too much when trying to sell while having hundreds of scrap on ship.
 
 ## TL;DR:
 
