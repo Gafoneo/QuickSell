@@ -149,7 +149,7 @@ public class SellCommand : Command
 
         string page = sellData.args[1].ToLower();
 
-        if (page == "pages" || page == "help")
+        if (page == "pages" || page == "page" || page == "help")
         {
             ChatCommandAPI.ChatCommandAPI.Print(
                 "======= PAGES HELP PAGE =======\n" +
