@@ -1,15 +1,20 @@
 using BepInEx;
-using BepInEx.Logging;
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using ChatCommandAPI;
 using HarmonyLib;
+using Steamworks.Ugc;
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using System.Data;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
+using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.Bindings;
+using UnityEngine.TerrainUtils;
 using Object = UnityEngine.Object;
 
 namespace QuickSell;
@@ -25,6 +30,8 @@ public class QuickSell : BaseUnityPlugin
     private ConfigEntry<string> priorityItems = null!;
     internal string[] ItemBlacklist => CommaSplit(itemBlacklist.Value);
     internal string[] PriorityItems => CommaSplit(priorityItems.Value);
+
+    public static HashSet<Item> allItems = [];
 
     private void Awake()
     {
@@ -83,6 +90,26 @@ public class SellCommand : Command
         public bool n = false;  // Force calculations to think that there was no restart before selling even if the client thinks otherwise
     }
 
+    // A wrapper method which runs provided function only if a desk exists
+    protected static Action CompleteOnlyWithDesk(Action action) =>
+        () =>
+        {
+            if (FindDesk(out sellData.desk)) action();
+        };
+
+    // A dictionary with variations (with added checks for desk existance where needed)
+    protected Dictionary<string, Action> actions = new()
+    {
+        { "help", SellHelp },
+        { "blacklist", SellBlacklist },
+        { "", CompleteOnlyWithDesk(SellNoArgs) },
+        { "item", CompleteOnlyWithDesk(SellParticularItem) },
+        { "quota", CompleteOnlyWithDesk(SellQuota) },
+        { "all", CompleteOnlyWithDesk(SellAll) },
+        { "amount", CompleteOnlyWithDesk(SellForRequestedAmount) }
+    };
+
+
     protected static SellData sellData;
 
     public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string _)
@@ -92,29 +119,44 @@ public class SellCommand : Command
 
         sellData = new() { args = args };
 
-        if (args.Length == 0)
-        {
-            if (!FindDesk(out sellData.desk)) return true;
-            SellNoArgs();
-            return true;
-        }
-
         // Parse the variation and the flags from the arguments
         ParseArguments();
 
-        if (sellData.variation == "help")
-        {
-            SellHelp();
-            return true;
-        }
-        else if (!FindDesk(out sellData.desk)) return true;
-
-        if (sellData.variation == "item") SellParticularItem();
-        else if (sellData.variation == "quota") SellQuota();
-        else if (sellData.variation == "all") SellAll();
-        else if (sellData.variation == "amount") SellForRequestedAmount();
+        // Executes chosen variation. Note that after this the sellData.desk variable is assigned if needed
+        if (actions.TryGetValue(sellData.variation, out var action)) action();
 
         return true;
+    }
+
+    protected static void ParseArguments()
+    {
+        QuickSell.Logger.LogDebug("Calling ParseArguments()");
+
+        if (sellData.args.Length == 0) return;
+
+        // Parsing variation
+        string probableVariation = sellData.args[0].ToLower();
+
+        if (new string[] { "help" }.Contains(probableVariation)) sellData.variation = "help";
+        else if (new string[] { "item", "items", "scrap" }.Contains(probableVariation)) sellData.variation = "item";
+        else if (new string[] { "quota" }.Contains(probableVariation)) sellData.variation = "quota";
+        else if (new string[] { "all" }.Contains(probableVariation)) sellData.variation = "all";
+        else if (new string[] { "blacklist", "bl" }.Contains(probableVariation)) sellData.variation = "blacklist";
+        else sellData.variation = "amount";
+
+        QuickSell.Logger.LogDebug($"variation: {(sellData.variation == "amount" ? "no variation keyword was used so assuming <amount>" : sellData.variation)}");
+
+        // Parsing flags
+        string flags = string.Join("", sellData.args.Where(i => i.First() == '-' && i.Length > 1).Select(i => i[1..]));
+
+        // Turn all the flags into variables for readability
+        sellData.t = flags.Contains("t");
+        sellData.o = flags.Contains("o");
+        sellData.a = flags.Contains("a");
+        sellData.n = flags.Contains("n");
+        QuickSell.Logger.LogDebug($"Flags: -t == {sellData.t}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}.");
+
+        return;
     }
 
     protected static void SellNoArgs()
@@ -483,6 +525,50 @@ public class SellCommand : Command
         SellForValue();
     }
 
+    protected static void SellBlacklist()
+    {
+        QuickSell.Logger.LogDebug($"variation == \"blacklist\" -> calling SellBlacklist()");
+
+        if (sellData.args.Length <= 1)
+        {
+            QuickSell.Logger.LogDebug($"No arguments were specified.");
+            ChatCommandAPI.ChatCommandAPI.PrintError("No arguments were specified. If you don't know how to use the command use \"/sell help blacklist\"");
+            return;
+        }
+
+        string itemName;
+        if (new string[] { "add", "a", "+" }.Contains(sellData.args[1]))
+        {
+            if (sellData.args.Length <= 2)
+            {
+                var player = StartOfRound.Instance.localPlayerController;
+
+                if (player == null)
+                {
+                    QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
+                    ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
+                    return;
+                }
+
+                var heldItem = player.ItemSlots[player.currentItemSlot];
+
+                if (heldItem == null || heldItem.name == "")
+                {
+                    QuickSell.Logger.LogDebug("No item is held and no item was specified");
+                    ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
+                    return;
+                }
+
+                itemName = RemoveClone(heldItem.name);
+            }
+            else
+            {
+                itemName = sellData.args[1];
+            }
+            QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
+        }
+    }
+
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
     protected static async void SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
     {
@@ -725,34 +811,6 @@ public class SellCommand : Command
         return true;
     }
 
-    protected static bool ParseArguments()
-    {
-        QuickSell.Logger.LogDebug("Calling ParseArguments()");
-
-        // Parsing variation
-        string probableVariation = sellData.args[0].ToLower();
-
-        if (new string[] { "help" }.Contains(probableVariation)) sellData.variation = "help";
-        else if (new string[] { "item", "items", "scrap" }.Contains(probableVariation)) sellData.variation = "item";
-        else if (new string[] { "quota" }.Contains(probableVariation)) sellData.variation = "quota";
-        else if (new string[] { "all" }.Contains(probableVariation)) sellData.variation = "all";
-        else sellData.variation = "amount";
-
-        QuickSell.Logger.LogDebug($"variation: {(sellData.variation == "amount" ? "no variation keyword was used so assuming <amount>" : sellData.variation)}");
-
-        // Parsing flags
-        string flags = string.Join("", sellData.args.Where(i => i.First() == '-' && i.Length > 1).Select(i => i[1..]));
-
-        // Turn all the flags into variables for readability
-        sellData.t = flags.Contains("t");
-        sellData.o = flags.Contains("o");
-        sellData.a = flags.Contains("a");
-        sellData.n = flags.Contains("n");
-        QuickSell.Logger.LogDebug($"Flags: -t == {sellData.t}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}.");
-
-        return true;
-    }
-
     protected static bool OpenDoor(out int itemCount, out int totalValue)
     {
         QuickSell.Logger.LogDebug("Calling OpenDoor()");
@@ -931,6 +989,11 @@ public class OvertimeCommand : Command
         error = "it should not happen";
         int realDeadline = SellCommand.GetDeadline(args.Length > 0 && args[0] == "-n");
         ChatCommandAPI.ChatCommandAPI.Print($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}");
+
+        QuickSell.allItems = [.. Resources.FindObjectsOfTypeAll<Item>().Where(item => item.spawnPrefab && "box" != item.itemName)];
+        ChatCommandAPI.ChatCommandAPI.Print(QuickSell.allItems.Select(i => $"{i.itemName} : {i.spawnPrefab.name} : {i.spawnPrefab.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "*NULL*"}").Join(delimiter: "\n"));
+
+
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
     }
