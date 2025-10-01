@@ -6,6 +6,7 @@ using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Data;
 using System.Linq;
 using UnityEngine;
@@ -67,8 +68,8 @@ public class SellCommand : Command
     protected struct SellData()
     {
         // Values
-        public string error = "If you got this error something really strange happend. Please let me know about it";  // An error code for ChatCommandAPI
         public string[] args = [];  // All original arguments given with the command
+        public DepositItemsDesk desk = new();  // Desk at the company
         public string variation = "";  // The command variation
         public int value = 0;  // Sum of values of items that should be on the counter
         public string originalValue = "";  // The requested value by the user (after expression evaluation)
@@ -84,45 +85,48 @@ public class SellCommand : Command
 
     protected static SellData sellData;
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string err)
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string _)
     {
-        try
+        QuickSell.Logger.LogDebug("The sell command was initiated");
+        _ = "";
+
+        sellData = new() { args = args };
+
+        if (args.Length == 0)
         {
-            QuickSell.Logger.LogDebug("The sell command was initiated");
-
-            sellData = new() { args = args };
-
-            if (args.Length == 0) return SellNoArgs();
-
-            // Parse the variation and the flags from the arguments
-            ParseArguments();
-
-            if (sellData.variation == "help") return SellHelp();
-            if (sellData.variation == "item") return SellParticularItem();
-            if (sellData.variation == "quota") return SellQuota();
-            if (sellData.variation == "all") return SellAll();
-            if (sellData.variation == "amount") return SellForRequestedAmount();
-
-            sellData.error = "No variation was specified?..";
-            return false;
+            if (!FindDesk(out sellData.desk)) return true;
+            SellNoArgs();
+            return true;
         }
-        finally
+
+        // Parse the variation and the flags from the arguments
+        ParseArguments();
+
+        if (sellData.variation == "help")
         {
-            err = sellData.error;
+            SellHelp();
+            return true;
         }
-    }
+        else if (!FindDesk(out sellData.desk)) return true;
 
-    protected static bool SellNoArgs()
-    {
-        QuickSell.Logger.LogDebug("Got no arguments -> calling SellNoArgs");
+        if (sellData.variation == "item") SellParticularItem();
+        else if (sellData.variation == "quota") SellQuota();
+        else if (sellData.variation == "all") SellAll();
+        else if (sellData.variation == "amount") SellForRequestedAmount();
 
-        if (!OpenDoor(out int itemCount, out int totalValue)) return false;
-
-        ChatCommandAPI.ChatCommandAPI.Print($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}");
         return true;
     }
 
-    protected static bool SellHelp()
+    protected static void SellNoArgs()
+    {
+        QuickSell.Logger.LogDebug("Got no arguments -> calling SellNoArgs");
+
+        if (!OpenDoor(out int itemCount, out int totalValue)) return;
+
+        ChatCommandAPI.ChatCommandAPI.Print($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}");
+    }
+
+    protected static void SellHelp()
     {
         QuickSell.Logger.LogDebug("variation == \"help\" -> calling SellHelp()");
         if (sellData.args.Length <= 1)
@@ -144,7 +148,7 @@ public class SellCommand : Command
                 "Use \"/sell help <variation>\" to see info on specific command\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
 
         string page = sellData.args[1].ToLower();
@@ -159,7 +163,7 @@ public class SellCommand : Command
                 "pages, flags, item, quota, all, amount, -o, -t, -a, -n\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "flags")
         {
@@ -179,7 +183,7 @@ public class SellCommand : Command
                 "Use \"/sell help <flag>\" to see info on specific flag\n" +
                 "=============================="
             );
-            return true;
+            return;
         }
         if (page == "item" || page == "items")
         {
@@ -190,7 +194,7 @@ public class SellCommand : Command
                 "Sells all items with the specified name. If no name was specified then checks what item you are holding and gets it's name instead (and sells this held item too)\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "quota")
         {
@@ -201,7 +205,7 @@ public class SellCommand : Command
                 "Checks how much quota is left and tries to sell exactly that (if it's not enough, nothing will be sold and if exact value isn't achievable sells the smallest value after that)\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "all")
         {
@@ -212,7 +216,7 @@ public class SellCommand : Command
                 "Sells all (non-blacklisted, use -a to ignore blacklist) items\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "amount" || page == "<amount>")
         {
@@ -223,7 +227,7 @@ public class SellCommand : Command
                 "Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "-o")
         {
@@ -236,7 +240,7 @@ public class SellCommand : Command
                 "requested value = final value in terminal (after leaving the planet) - existing money (look into -t help page for that)\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "-t")
         {
@@ -248,7 +252,7 @@ public class SellCommand : Command
                 "requested value = final value in terminal (after leaving the planet) = existing money + sold items (+ overtime caused by sold items if -o flag is present)\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "-a")
         {
@@ -259,7 +263,7 @@ public class SellCommand : Command
                 "When trying to find right items to sell, ignores blacklist so that all items can be sold\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
         if (page == "-n")
         {
@@ -274,14 +278,13 @@ public class SellCommand : Command
                 "15 bigger so you should ask your host if they have done a rehost or not to get it right\n" +
                 "==============================="
             );
-            return true;
+            return;
         }
 
-        sellData.error = "No page with this name exists";
-        return false;
+        ChatCommandAPI.ChatCommandAPI.PrintError("No page with this name exists");
     }
 
-    protected static bool SellParticularItem()
+    protected static void SellParticularItem()
     {
         QuickSell.Logger.LogDebug("variation == \"item\" -> calling SellParticularItem()");
 
@@ -293,8 +296,8 @@ public class SellCommand : Command
             if (player == null)
             {
                 QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
-                sellData.error = "localPlayerController == null";
-                return false;
+                ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
+                return;
             }
 
             var heldItem = player.ItemSlots[player.currentItemSlot];
@@ -302,8 +305,8 @@ public class SellCommand : Command
             if (heldItem == null || heldItem.name == "")
             {
                 QuickSell.Logger.LogDebug("No item is held and no item was specified");
-                sellData.error = "No item is held and no item was specified";
-                return false;
+                ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
+                return;
             }
 
             itemName = RemoveClone(heldItem.name);
@@ -318,30 +321,28 @@ public class SellCommand : Command
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
         }
 
-        if (!FindDesk(out var desk)) return false;
-
         var items = Object.FindObjectsOfType<GrabbableObject>();
         if (items == null || items.Length == 0)
         {
             QuickSell.Logger.LogDebug("No items were found");
-            sellData.error = "No items were found";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("No items were found");
+            return;
         }
 
         items = FindItems(items, itemName);
         if (items == null || items.Length == 0)
         {
             QuickSell.Logger.LogDebug($"No items called \"{itemName}\" were detected");
-            sellData.error = $"No items called \"{itemName}\" were detected";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError($"No items called \"{itemName}\" were detected");
+            return;
         }
 
-        if (!SellItems([.. items], out int itemCount)) return false;
+        if (!SellItems([.. items], out int itemCount)) return;
 
-        if (!desk.doorOpen)
+        if (!sellData.desk.doorOpen)
         {
             QuickSell.Logger.LogDebug("The door is not open -> opening it");
-            desk.SetTimesHeardNoiseServerRpc(5f);
+            sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         }
 
         // The printout of the selling results
@@ -352,10 +353,9 @@ public class SellCommand : Command
         );
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
-        return true;
     }
 
-    protected static bool SellQuota()
+    protected static void SellQuota()
     {
         QuickSell.Logger.LogDebug("variation == \"quota\" -> calling SellQuota()");
 
@@ -371,21 +371,21 @@ public class SellCommand : Command
                 $"==============================="
             );
             QuickSell.Logger.LogDebug("Quota is already fulfilled -> nothing left to do");
-            return true;
+            return;
         }
 
-        return SellForValue();
+        SellForValue();
     }
 
-    protected static bool SellAll()
+    protected static void SellAll()
     {
         QuickSell.Logger.LogDebug("variation == \"all\" -> calling SellAll()");
         sellData.value = -1;
 
-        return SellForValue();
+        SellForValue();
     }
 
-    protected static bool SellForRequestedAmount()
+    protected static void SellForRequestedAmount()
     {
         QuickSell.Logger.LogDebug($"variation == \"<amount>\" -> calling SellForRequestedAmount()");
 
@@ -403,22 +403,22 @@ public class SellCommand : Command
         catch
         {
             QuickSell.Logger.LogDebug("Failed to evalute expression");
-            sellData.error = "Failed to evalute expression";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("Failed to evalute expression");
+            return;
         }
 
         // Two checks for value being right
         if (!int.TryParse(evaluatedExpression, out sellData.value) || sellData.value < 0)
         {
             QuickSell.Logger.LogDebug("The value is not convertable into integer");
-            sellData.error = "The value is not convertable into integer";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("The value is not convertable into integer");
+            return;
         }
         if (sellData.value < 0)
         {
             QuickSell.Logger.LogDebug("The value must be positive");
-            sellData.error = "The value must be positive";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("The value must be positive");
+            return;
         }
         QuickSell.Logger.LogDebug($"Expression evaluated: {expression} => {evaluatedExpression}");
 
@@ -433,9 +433,9 @@ public class SellCommand : Command
             var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
             if (terminal == null)
             {
-                sellData.error = "Cannot find terminal!";
+                ChatCommandAPI.ChatCommandAPI.PrintError("Cannot find terminal!");
                 QuickSell.Logger.LogDebug($"Cannot find terminal!");
-                return false;
+                return;
             }
 
             int credits = Traverse.Create(terminal).Field("groupCredits").GetValue<int>();
@@ -462,7 +462,7 @@ public class SellCommand : Command
             {
                 QuickSell.Logger.LogDebug($"{sellData.value} <= 0 -> There is no need to sell anything, terminating");
                 ChatCommandAPI.ChatCommandAPI.Print($"You already have {sellData.existingMoney} existing money out of desired {sellData.originalValue}");
-                return true;
+                return;
             }
 
         }
@@ -480,42 +480,40 @@ public class SellCommand : Command
             QuickSell.Logger.LogDebug($"New value before overtime: {sellData.value}");
         }
 
-        return SellForValue();
+        SellForValue();
     }
 
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
-    protected static bool SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
+    protected static async void SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
     {
         QuickSell.Logger.LogDebug($"Calling SellForValue({sellData.value})");
 
-        if (!FindDesk(out var desk)) return false;
-
-        var items = ItemsForValue(sellData.value, sellData.a);
+        var items = await Task.Run(() => ItemsForValue(sellData.value, sellData.a));
         if (items == null)
         {
             QuickSell.Logger.LogDebug("Got null from ItemsForValue() -> not selling anything");
-            sellData.error = "No items were found";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("No items were found");
+            return;
         }
 
         if (items.Count == 0)
         {
             QuickSell.Logger.LogDebug("The list of items you need to sell is empty so you probably can't afford the amount you requested. If not, please report this.");
-            sellData.error = "You can't afford to sell that amount";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("You can't afford to sell that amount");
+            return;
         }
 
         if (!SellItems(items, out int itemCount))
         {
             QuickSell.Logger.LogDebug("Error selling items");
-            sellData.error = "Error selling items";
-            return false;
+            ChatCommandAPI.ChatCommandAPI.PrintError("Error selling items");
+            return;
         }
 
-        if (!desk.doorOpen)
+        if (!sellData.desk.doorOpen)
         {
             QuickSell.Logger.LogDebug("The door is not open -> opening it");
-            desk.SetTimesHeardNoiseServerRpc(5f);
+            sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         }
         else
         {
@@ -554,14 +552,11 @@ public class SellCommand : Command
         );
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
-        return true;
     }
 
     protected static List<GrabbableObject>? ItemsForValue(int value, bool ignoreBlacklist)
     {
         QuickSell.Logger.LogDebug($"Calling ItemsForValue({value})");
-
-        if (!FindDesk(out var desk)) QuickSell.Logger.LogDebug("A desk was not found, not a critical error, continuing");
 
         if (value is 0)
         {
@@ -683,7 +678,6 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"Calling SellItems({NumberOfItems(items.Count())})");
         itemCount = 0;
-        if (!FindDesk(out var desk)) return false;
 
         QuickSell.Logger.LogDebug($"Looping through every item");
         foreach (var i in items)
@@ -693,8 +687,8 @@ public class SellCommand : Command
             QuickSell.Logger.LogDebug($"Item: {i.name}, price: {i.scrapValue}");
             itemCount++;
 
-            var vector = RoundManager.RandomPointInBounds(desk.triggerCollider.bounds);
-            vector.y = desk.triggerCollider.bounds.min.y;
+            var vector = RoundManager.RandomPointInBounds(sellData.desk.triggerCollider.bounds);
+            vector.y = sellData.desk.triggerCollider.bounds.min.y;
             if (
                 Physics.Raycast(
                     new Ray(vector + Vector3.up * 3f, Vector3.down),
@@ -709,18 +703,18 @@ public class SellCommand : Command
             }
 
             vector.y += i.itemProperties.verticalOffset;
-            vector = desk.deskObjectsContainer.transform.InverseTransformPoint(vector);
+            vector = sellData.desk.deskObjectsContainer.transform.InverseTransformPoint(vector);
 
-            desk.AddObjectToDeskServerRpc(i.NetworkObject);
+            sellData.desk.AddObjectToDeskServerRpc(i.NetworkObject);
             GameNetworkManager.Instance.localPlayerController.PlaceGrabbableObject(
-                desk.deskObjectsContainer.transform,
+                sellData.desk.deskObjectsContainer.transform,
                 vector,
                 false,
                 i
             );
             GameNetworkManager.Instance.localPlayerController.PlaceObjectServerRpc(
                 i.NetworkObject,
-                desk.deskObjectsContainer,
+                sellData.desk.deskObjectsContainer,
                 vector,
                 false
             );
@@ -766,27 +760,25 @@ public class SellCommand : Command
         itemCount = 0;
         totalValue = 0;
 
-        if (!FindDesk(out var desk)) return false;
-
-        itemCount = desk.itemsOnCounter.Count;
-        totalValue = desk.itemsOnCounter.Sum(i => i.scrapValue);
+        itemCount = sellData.desk.itemsOnCounter.Count;
+        totalValue = sellData.desk.itemsOnCounter.Sum(i => i.scrapValue);
         QuickSell.Logger.LogDebug($"There are {NumberOfItems(itemCount)} on the desk worth {ValueOfItems(totalValue)}");
         if (itemCount == 0)
         {
             QuickSell.Logger.LogDebug("No items on the desk");
-            sellData.error = "No items on the desk";
+            ChatCommandAPI.ChatCommandAPI.PrintError("No items on the desk");
             return false;
         }
         
-        if (desk.doorOpen)
+        if (sellData.desk.doorOpen)
         {
             QuickSell.Logger.LogDebug("Door was already open -> nothing left to do");
-            sellData.error = "Door already open";
+            ChatCommandAPI.ChatCommandAPI.PrintError("Door already open");
             return false;
         }
 
         QuickSell.Logger.LogDebug("Opening a door");
-        desk.SetTimesHeardNoiseServerRpc(5f);
+        sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         return true;
     }
 
@@ -794,30 +786,24 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug("Calling DelayedDeskCheck() (DDS)");
 
-        if (!FindDesk(out var desk))
-        {
-            QuickSell.Logger.LogDebug("DDS: No desk was found, terminating");
-            yield break;
-        }
-
         yield return new WaitForSeconds(10f);
         QuickSell.Logger.LogDebug("DDS: 10 seconds passed");
 
-        if (desk.itemsOnCounter.Count <= 0)
+        if (sellData.desk.itemsOnCounter.Count <= 0)
         {
             QuickSell.Logger.LogDebug("DDS: Desk still has no items, terminating");
             yield break;
         }
         QuickSell.Logger.LogDebug("DDS: Desk still has items");
 
-        if (desk.doorOpen)
+        if (sellData.desk.doorOpen)
         {
             QuickSell.Logger.LogDebug("Door was already open, terminating");
             yield break;
         }
 
         QuickSell.Logger.LogDebug("Opening a door");
-        desk.SetTimesHeardNoiseServerRpc(5f);
+        sellData.desk.SetTimesHeardNoiseServerRpc(5f);
     }
 
     protected internal static int GetDeadline(bool forceNonRestart = false)
@@ -887,8 +873,6 @@ public class SellCommand : Command
         if (ignoreBlacklist) QuickSell.Logger.LogDebug($"Ignoring blacklist");
         else QuickSell.Logger.LogDebug($"Blacklisted items: {QuickSell.Instance.ItemBlacklist.Join()}");
 
-        var desk = FindDesk() ?? new DepositItemsDesk() { itemsOnCounter = [] };
-
         return [.. items
             .Where(i => i is
                 {
@@ -897,7 +881,7 @@ public class SellCommand : Command
                     isPocketed: false,
                     itemProperties.isScrap: true
                 }
-                && !desk.itemsOnCounter.Contains(i)
+                && !sellData.desk.itemsOnCounter.Contains(i)
             )
             .Where(i => !QuickSell.Instance.ItemBlacklist.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
     }
@@ -906,31 +890,16 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"Calling FindItems({NumberOfItems(items.Count())}, {itemName})");
 
-        var desk = FindDesk() ?? new DepositItemsDesk() { itemsOnCounter = [] };
-
         return [.. items
             .Where(i => i is
                 {
                     isHeld: false,
                     isPocketed: false
                 }
-                && !desk.itemsOnCounter.Contains(i)
+                && !sellData.desk.itemsOnCounter.Contains(i)
             )
             .Where(i => RemoveClone(i.name).ToLower() == itemName.ToLower())];
     }
-
-    protected internal static DepositItemsDesk? FindDesk()
-    {
-        QuickSell.Logger.LogDebug("Calling FindDesk0()");
-        var desk = Object.FindObjectOfType<DepositItemsDesk>();
-        if (GameNetworkManager.Instance == null || desk == null)
-        {
-            QuickSell.Logger.LogDebug("A desk was not found");
-            return null;
-        }
-        QuickSell.Logger.LogDebug("A desk was found");
-        return desk;
-    }  // Maybe merge the two functions
 
     protected internal static bool FindDesk(out DepositItemsDesk desk)
     {
@@ -939,7 +908,7 @@ public class SellCommand : Command
         if (GameNetworkManager.Instance == null || desk == null)
         {
             QuickSell.Logger.LogDebug("A desk was not found");
-            sellData.error = "A desk was not found";
+            ChatCommandAPI.ChatCommandAPI.PrintError("A desk was not found");
             return false;
         }
 
