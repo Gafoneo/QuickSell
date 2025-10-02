@@ -2,6 +2,7 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using ChatCommandAPI;
+using EasyTextEffects.Editor.MyBoxCopy.Extensions;
 using HarmonyLib;
 using System;
 using System.Collections;
@@ -16,13 +17,16 @@ namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
-public class QuickSell : BaseUnityPlugin  // Add blacklist help
+public class QuickSell : BaseUnityPlugin  // Add blacklist help, also note the -a and -p flags
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;
 
     internal ConfigEntry<string> itemBlacklistConfig = null!;
     internal HashSet<string> ItemBlacklistSet = [];
+    internal HashSet<string> TempBlacklistAddSet = [];
+    internal HashSet<string> TempBlacklistRmSet = [];
+    internal HashSet<string> ActiveBlacklistSet = [];  // Add implementation
     internal bool UpdateBlacklist = false;
 
     internal ConfigEntry<string> priorityItemsConfig = null!;
@@ -48,9 +52,9 @@ public class QuickSell : BaseUnityPlugin  // Add blacklist help
             "Items which are prioritized when selling"
         );
 
+        UpdateBlacklist = true;
         RebuildBlacklistSet();
         PriorityItemsSet = CommaSplit(priorityItemsConfig.Value);
-        UpdateBlacklist = true;
         itemBlacklistConfig.SettingChanged += (_, _) => RebuildBlacklistSet();
 
         _ = new SellCommand();
@@ -79,20 +83,70 @@ public class QuickSell : BaseUnityPlugin  // Add blacklist help
         Logger.LogDebug($"allItems list created. Length: {allItems.Count}");
     }
 
-    private void RebuildBlacklistSet()
+    public void RebuildBlacklistSet()
     {
         if (!UpdateBlacklist) return;
         QuickSell.Logger.LogDebug($"Constructing a new blacklist");
-        QuickSell.Logger.LogDebug($"Old blacklist: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+        QuickSell.Logger.LogDebug($"Old blacklist set: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
         ItemBlacklistSet = CommaSplit(itemBlacklistConfig.Value);
-        QuickSell.Logger.LogDebug($"New blacklist: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+        RebuildActiveBlacklist();
+        QuickSell.Logger.LogDebug($"New blacklist set: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
     }
+
+    public void RebuildActiveBlacklist() =>
+        ActiveBlacklistSet = [.. ItemBlacklistSet.Union(TempBlacklistAddSet).Except(TempBlacklistRmSet)];
 
     internal static string CommaJoin(HashSet<string> i) => i.Join(delimiter: ",");
 
     internal static HashSet<string> CommaSplit(string i) => [.. i.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim())];
+
+    /// <summary>
+    /// Prints provided message in chat with start and end lines and a title
+    /// </summary>
+    /// <param name="message">Provided message</param>
+    /// <param name="title">Title displayed on top of the messagee</param>
+    /// <param name="addColorToContents">Add colors to the message itself (not the lines) or not</param>
+    /// <param name="line">The line in which the title will be embedded and which will be at the end</param>
+    /// <param name="color">The colour of this chat block</param>
+    public static void FancyChatDisplay(string message, string title = "", bool addColorToContents = true, string line = "===============================", string color = "#00ffff")
+    {
+        string titleLine;
+        if (title != "")
+        {
+            string titleContents = " " + title + " ";
+
+            // Ensure we have room for at least 2 '=' (one each side) if content is longer than original
+            int minimumLength = Math.Max(line.Length, titleContents.Length + 2);
+
+            int equalsNeeded = minimumLength - titleContents.Length;
+            int leftEquals = equalsNeeded / 2;  // The smaller value
+            int rightEquals = equalsNeeded - leftEquals;  // Extra equal sign goes to the right if odd
+
+            titleLine = $"<color={color}>{new string('=', leftEquals)}{titleContents}{new string('=', rightEquals)}</color>\n";
+        }
+        else titleLine = $"<color={color}>{line}</color>\n";
+
+        string contents =
+            (addColorToContents ? $"<color={color}>{message}</color>" : message) +
+            (message.Last() != '\n' ? "\n" : "");
+
+        string endingLine = $"<color={color}>{line}</color>";
+
+        HUDManager.Instance.ChatMessageHistory.Add(titleLine + contents + endingLine);
+        UpdateChat();
+    }
+
+    public static void UpdateChat()
+    {
+        HUDManager.Instance.chatText.text = string.Join(
+            "\n",
+            HUDManager.Instance.ChatMessageHistory
+        );
+        HUDManager.Instance.PingHUDElement(HUDManager.Instance.Chat, 4f);
+    }
+
 }
- 
+
 public class SellCommand : Command
 {
     public override string Name => "Sell";
@@ -112,10 +166,11 @@ public class SellCommand : Command
         public int existingMoney = 0;  // The existing money that we need to account for (money in terminal or/and existing overtime)
 
         // Flags
+        public bool e = false;  // Account for existing money
         public bool o = false;  // Check for overtime
-        public bool t = false;  // Account for existing money
         public bool a = false;  // Ignore blacklist
         public bool n = false;  // Force calculations to think that there was no restart before selling even if the client thinks otherwise
+        public bool p = false;  // Permanent (blacklist, priority etc.)
     }
 
     // A wrapper method which runs provided function only if a desk exists
@@ -156,13 +211,25 @@ public class SellCommand : Command
         return true;
     }
 
-    protected static void ParseArguments()
+    protected static void ParseArguments()  // Remove -t flag after a few updates
     {
         QuickSell.Logger.LogDebug("Calling ParseArguments()");
 
-        if (sellData.args.Length == 0 || sellData.args[0] == "") return;
+        // Parsing flags
+        string flags = string.Join("", sellData.args.Where(i => i != "" && i.First() == '-' && i.Length > 1).Select(i => i[1..]));
 
-        sellData.args = [.. sellData.args.Where(i => i != "")];
+        // Turn all the flags into variables for readability
+        sellData.e = flags.Contains("e") || flags.Contains("t");  // Remove -t after a few updates
+        sellData.o = flags.Contains("o");
+        sellData.a = flags.Contains("a");
+        sellData.n = flags.Contains("n");
+        sellData.p = flags.Contains("p");
+        if (flags.Contains("t")) ChatCommandAPI.ChatCommandAPI.PrintError("Flag -t as a check for existing money will be depricated soon. Use -e instead");
+        QuickSell.Logger.LogDebug($"Flags: -e == {sellData.e}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}; -p == {sellData.p}");
+
+        sellData.args = [.. sellData.args.Where(i => i != "" && !(i.First() == '-' && i.Length > 1))];
+
+        if (sellData.args.Length == 0) return;
 
         // Parsing variation
         string probableVariation = sellData.args[0].ToLower();
@@ -176,16 +243,6 @@ public class SellCommand : Command
 
         QuickSell.Logger.LogDebug($"variation: {(sellData.variation == "amount" ? "no variation keyword was used so assuming <amount>" : sellData.variation)}");
 
-        // Parsing flags
-        string flags = string.Join("", sellData.args.Where(i => i.First() == '-' && i.Length > 1).Select(i => i[1..]));
-
-        // Turn all the flags into variables for readability
-        sellData.t = flags.Contains("t");
-        sellData.o = flags.Contains("o");
-        sellData.a = flags.Contains("a");
-        sellData.n = flags.Contains("n");
-        QuickSell.Logger.LogDebug($"Flags: -t == {sellData.t}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}.");
-
         return;
     }
 
@@ -195,162 +252,175 @@ public class SellCommand : Command
 
         if (!OpenDoor(out int itemCount, out int totalValue)) return;
 
-        ChatCommandAPI.ChatCommandAPI.Print($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}");
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}");
     }
 
     protected static void SellHelp()
     {
         QuickSell.Logger.LogDebug("variation == \"help\" -> calling SellHelp()");
-        if (sellData.args.Length <= 1)
+
+        // Throw this into another file maybe
+        Dictionary<string, string> pages = new()
         {
-            QuickSell.Logger.LogDebug("No more arguments -> printing default help page");
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "========== HELP PAGE ==========\n" +
-                "Usage: /sell <variation> [flags]\n\n" +
+            {
+                "",
+                """
+                Usage: /sell <variation> [flags]
 
-                "Command variations:\n" +
-                "\"help\" to open this page or a specific help page \n" +
-                "\"item\" to sell all items like the one you are holding or the one you specified\n" +
-                "\"quota\" to sell exactly for quota\n" +
-                "\"all\" to sell all unfiltered scrap available\n" +
-                "<amount> (input a number instead of \"amount\") to sell exactly how much you need\n\n" +
+                Command variations:
+                "help" to open this page or a specific help page
+                "item" to sell all items like the one you are holding or the one you specified
+                "quota" to sell exactly for quota
+                "all" to sell all unfiltered scrap available
+                <amount> (input a number instead of \"amount\") to sell exactly how much you need
 
-                "Use \"/sell help pages\" to see info on all pages\n" +
-                "Use \"/sell help flags\" to see info on important flags\n" +
-                "Use \"/sell help <variation>\" to see info on specific command\n" +
-                "==============================="
-            );
+                Use "/sell help pages" to see info on all pages
+                Use "/sell help flags" to see info on important flags
+                Use "/sell help <variation>" to see info on specific command
+                """
+            },
+            {
+                "pages",
+                """
+                Usage: /sell help [page]
+
+                Pages:
+                default, pages, flags, item, quota, all, amount, -o, -e, -a, -n
+                """
+            },
+            {
+                "flags",
+                """
+                Usage: /sell <variation> [flags]
+
+                Combining flags:
+                Split: /sell <variation> -e -o -a
+                Together: /sell <variation> -eoa
+
+                "-o" to sell accounting for overtime (used with <amount>)
+                "-e" for accounting for existing money in terminal and overtime (used with <amount>)
+                "-a" to ignore blacklist (used with quota, all, <amount>)
+                "-n" to force non-restart overtime calculations (needed in rare edge cases)
+
+                Use "/sell help <flag>" to see info on specific flag
+                """
+            },
+            {
+                "item",
+                """
+                Usage: /sell item [item]
+
+                Sells all items with the specified name. If no name was specified then checks what item you are holding and gets it's name instead (and sells this held item too)
+                """
+            },
+            {
+                "quota",
+                """
+                Usage: /sell quota [-a]
+
+                Checks how much quota is left and tries to sell exactly that (if it's not enough, nothing will be sold and if exact value isn't achievable sells the smallest value after that)
+                """
+            },
+            {
+                "all",
+                """
+                Usage: /sell all [-a]
+
+                Sells all (non-blacklisted, use -a to ignore blacklist) items
+                """
+            },
+            {
+                "amount",
+                """
+                Usage: /sell <amount> [-o] [-e] [-a] [-n]
+
+                Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that
+                """
+            },
+            {
+                "-o",
+                """
+                Usage: /sell <amount> -o
+
+                Respects the fact that your sold items can cause overtime and includes it in the calculations (note that the overtime caused by already sold items isn't included, you need -e flag for that) so that: requested value = final value in terminal (after leaving the planet) - existing money (look into -e help page for that)
+                """
+            },
+            {
+                "-e",
+                """
+                Usage: /sell <amount> -e
+
+                (Previously -t, but was changed to -e)
+                Removes existing money (already existing credits in terminal, items on desk and, if -o flag is present, future overtime based on these two) from your requsted value so that: requested value = final value in terminal (after leaving the planet) = existing money + sold items (+ overtime caused by sold items if -o flag is present)
+                """
+            },
+            {
+                "-a",
+                """
+                Usage: /sell <quota | all | amount> -a
+
+                When trying to find right items to sell, ignores all blacklists so that *EVERY* item can be sold
+                """
+            },
+            {
+                "-n",
+                """
+                Usage: /sell <amount> -n
+
+                Forces EVERY overtime calculation that occures during the execution of THIS command to think that there was no rehost after the final day of this quota, even if there was one). It is only needed if a host has a mod for late joining (aka LateCompany) and you joined after the final day of this quota (your client will think that there was a rehost then). There is no way (that I know of, at least, if you know one please tell me) to check if there was or wasn't a real rehost in this case, and if there wasn't, then all overtime calculations will be 15 smaller. This flag accounts for that, but note that if the rehost has actually occured and you used this flag then all overtime calculation will be 15 bigger so you should ask your host if they have done a rehost or not to get it right\n" +
+                """
+            }
+        };
+
+        if (sellData.args.Length <= 1 && !(sellData.o || sellData.e || sellData.a || sellData.n))
+        {
+            QuickSell.FancyChatDisplay(pages[""], "HELP PAGE");
             return;
         }
 
-        string page = sellData.args[1].ToLower();
-
-        if (page == "pages" || page == "page" || page == "help")
+        // Switch for flags
+        switch (true)
         {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======= PAGES HELP PAGE =======\n" +
-                "Usage: /sell help [page]\n\n" +
-
-                "Pages:\n" +
-                "pages, flags, item, quota, all, amount, -o, -t, -a, -n\n" +
-                "==============================="
-            );
-            return;
+            case bool when sellData.o:
+                QuickSell.FancyChatDisplay(pages["-o"], "-O HELP PAGE");
+                return;
+            case bool when sellData.e:
+                QuickSell.FancyChatDisplay(pages["-e"], "-E HELP PAGE");
+                return;
+            case bool when sellData.a:
+                QuickSell.FancyChatDisplay(pages["-a"], "-A HELP PAGE");
+                return;
+            case bool when sellData.n:
+                QuickSell.FancyChatDisplay(pages["-n"], "-N HELP PAGE");
+                return;
         }
-        if (page == "flags")
+
+        // Switch for everything else
+        switch (sellData.args[1].ToLower())
         {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======= FLAG HELP PAGE ========\n" +
-                "Usage: /sell <variation> [flags]\n\n" +
-
-                "Combining flags:\n" +
-                "Split: /sell <variation> -t -o -a\n" +
-                "Together: /sell <variation> -toa\n\n" +
-
-                "\"-o\" to sell accounting for overtime (used with <amount>)\n" +
-                "\"-t\" for accounting for existing money in terminal and overtime (used with <amount>)\n" +
-                "\"-a\" to ignore blacklist (used with quota, all, <amount>)\n" +
-                "\"-n\" to force non-restart overtime calculations (needed in rare edge cases)\n\n" +
-
-                "Use \"/sell help <flag>\" to see info on specific flag\n" +
-                "=============================="
-            );
-            return;
-        }
-        if (page == "item" || page == "items")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======= ITEM HELP PAGE ========\n" +
-                "Usage: /sell item [item]\n\n" +
-
-                "Sells all items with the specified name. If no name was specified then checks what item you are holding and gets it's name instead (and sells this held item too)\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "quota")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======= QUOTA HELP PAGE =======\n" +
-                "Usage: /sell quota [-a]\n\n" +
-
-                "Checks how much quota is left and tries to sell exactly that (if it's not enough, nothing will be sold and if exact value isn't achievable sells the smallest value after that)\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "all")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======== ALL HELP PAGE ========\n" +
-                "Usage: /sell all [-a]\n\n" +
-
-                "Sells all (non-blacklisted, use -a to ignore blacklist) items\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "amount" || page == "<amount>")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "===== AMOUNT HELP PAGE =====\n" +
-                "Usage: /sell <amount> [-o] [-t] [-a] [-n]\n\n" +
-
-                "Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "-o")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======== -o HELP PAGE =========\n" +
-                "Usage: /sell <amount> -o\n\n" +
-
-                "Respects the fact that your sold items can cause overtime and includes it in the calculations " +
-                "(note that the overtime caused by already sold items isn't included, you need -t flag for that) so that:\n" +
-                "requested value = final value in terminal (after leaving the planet) - existing money (look into -t help page for that)\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "-t")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======== -t HELP PAGE =========\n" +
-                "Usage: /sell <amount> -t\n\n" +
-
-                "Removes existing money (already existing credits in terminal, items on desk and, if -o flag is present, future overtime based on these two) from your requsted value so that:\n" +
-                "requested value = final value in terminal (after leaving the planet) = existing money + sold items (+ overtime caused by sold items if -o flag is present)\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "-a")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======== -a HELP PAGE =========\n" +
-                "Usage: /sell <quota | all | amount> -a\n\n" +
-
-                "When trying to find right items to sell, ignores blacklist so that all items can be sold\n" +
-                "==============================="
-            );
-            return;
-        }
-        if (page == "-n")
-        {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                "======== -n HELP PAGE =========\n" +
-                "Usage: /sell <amount> -n\n\n" +
-
-                "Forces EVERY overtime calculation that occures during the execution of THIS command to think that there was no rehost after the final day of this quota, even if there was one). " +
-                "It is only needed if a host has a mod for late joining (aka LateCompany) and you joined after the final day of this quota (your client will think that there was a rehost then). " +
-                "There is no way (that I know of, at least, if you know one please tell me) to check if there was or wasn't a real rehost in this case, and if there wasn't, then all overtime " +
-                "calculations will be 15 smaller. This flag accounts for that, but note that if the rehost has actually occured and you used this flag then all overtime calculation will be " +
-                "15 bigger so you should ask your host if they have done a rehost or not to get it right\n" +
-                "==============================="
-            );
-            return;
+            case "pages":
+            case "page":
+            case "help":
+                QuickSell.FancyChatDisplay(pages["pages"], "PAGES HELP PAGE");
+                return;
+            case "flags":
+            case "flag":
+                QuickSell.FancyChatDisplay(pages["flags"], "FLAG HELP PAGE");
+                return;
+            case "item":
+            case "items":
+                QuickSell.FancyChatDisplay(pages["item"], "ITEM HELP PAGE");
+                return;
+            case "quota":
+                QuickSell.FancyChatDisplay(pages["quota"], "QUOTA HELP PAGE");
+                return;
+            case "all":
+                QuickSell.FancyChatDisplay(pages["all"], "ALL HELP PAGE");
+                return;
+            case "amount":
+            case "<amount>":
+                QuickSell.FancyChatDisplay(pages["amount"], "AMOUNT HELP PAGE");
+                return;
         }
 
         ChatCommandAPI.ChatCommandAPI.PrintError("No page with this name exists");
@@ -361,35 +431,17 @@ public class SellCommand : Command
         QuickSell.Logger.LogDebug("variation == \"item\" -> calling SellParticularItem()");
 
         string itemName;
-        if (sellData.args.Length == 1)
+        if (sellData.args.Length <= 1)
         {
-            var player = StartOfRound.Instance.localPlayerController;
-
-            if (player == null)
-            {
-                QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
-                ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
-                return;
-            }
-
-            var heldItem = player.ItemSlots[player.currentItemSlot];
-
-            if (heldItem == null || heldItem.name == "")
-            {
-                QuickSell.Logger.LogDebug("No item is held and no item was specified");
-                ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
-                return;
-            }
-
-            itemName = RemoveClone(heldItem.name);
+            if (!CheckHeldItem(out itemName))
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
 
             QuickSell.Logger.LogDebug("Dropping held item");
-            player.DiscardHeldObject();
+            StartOfRound.Instance.localPlayerController.DiscardHeldObject();
         }
         else
         {
-            itemName = GetActualItemName(sellData.args[1]);
+            itemName = GetActualItemByName(sellData.args[1]).prefabName;
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
         }
 
@@ -417,12 +469,7 @@ public class SellCommand : Command
             sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         }
 
-        // The printout of the selling results
-        ChatCommandAPI.ChatCommandAPI.Print(
-            $"==============================\n" +
-            $"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}" +
-            $"\n=============================="
-        );
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}");
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
     }
@@ -437,11 +484,7 @@ public class SellCommand : Command
 
         if (sellData.value < 1)
         {
-            ChatCommandAPI.ChatCommandAPI.Print(
-                $"===============================\n" +
-                $"Quota is already fulfilled\n" +
-                $"==============================="
-            );
+            QuickSell.FancyChatDisplay($"Quota is already fulfilled");
             QuickSell.Logger.LogDebug("Quota is already fulfilled -> nothing left to do");
             return;
         }
@@ -498,7 +541,7 @@ public class SellCommand : Command
         sellData.originalValue = sellData.value.ToString();
 
         // Logic for accounting for money in terminal and already existing overtime
-        if (sellData.t)
+        if (sellData.e)
         {
             QuickSell.Logger.LogDebug($"Entering logic for accounting for existing money");
 
@@ -559,10 +602,15 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"variation == \"blacklist\" -> calling SellBlacklist()");
 
-        if (sellData.args.Length <= 1)
+        if (sellData.args.Length <= 1 && sellData.p)
         {
-            QuickSell.Logger.LogDebug($"No arguments were specified.");
-            ChatCommandAPI.ChatCommandAPI.PrintError("No arguments were specified. If you don't know how to use the command use \"/sell help blacklist\"");
+            BlacklistDisplay();
+            return;
+        }
+
+        else if (sellData.args.Length <= 1)
+        {
+            TempBlacklistDisplay();
             return;
         }
 
@@ -570,6 +618,21 @@ public class SellCommand : Command
         bool add;
         if (new string[] { "add", "ad", "a", "+" }.Contains(sellData.args[1])) add = true;
         else if (new string[] { "remove", "rm", "r", "-" }.Contains(sellData.args[1])) add = false;
+        else if (new string[] { "empty", "flash", "flush"}.Contains(sellData.args[1]))
+        {
+            if (sellData.p)
+            {
+                QuickSell.Logger.LogDebug($"Denied request to empty permanent blacklist");
+                ChatCommandAPI.ChatCommandAPI.PrintError($"The permanent blacklist cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
+                return;
+            }
+
+            QuickSell.Instance.TempBlacklistAddSet.Clear();
+            QuickSell.Instance.TempBlacklistRmSet.Clear();
+            QuickSell.Instance.RebuildActiveBlacklist();
+            QuickSell.FancyChatDisplay("Successfully emptied temporary blacklist");
+            return;
+        }
         else
         {
             QuickSell.Logger.LogDebug($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
@@ -581,77 +644,173 @@ public class SellCommand : Command
         string actualItemName;
         if (sellData.args.Length <= 2)
         {
-            var player = StartOfRound.Instance.localPlayerController;
-
-            if (player == null)
-            {
-                QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
-                ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
-                return;
-            }
-
-            var heldItem = player.ItemSlots[player.currentItemSlot];
-
-            if (heldItem == null || heldItem.name == "")
-            {
-                QuickSell.Logger.LogDebug("No item is held and no item was specified");
-                ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
-                return;
-            }
-
-            actualItemName = RemoveClone(heldItem.name);
+            if (!CheckHeldItem(out actualItemName)) return;
         }
         else
         {
-            actualItemName = GetActualItemName(sellData.args[2]);
+            actualItemName = GetActualItemByName(sellData.args[2]).prefabName;
         }
         QuickSell.Logger.LogDebug($"Item to blacklist: {actualItemName}");
 
-        // Adding/removing to/from config
-        if (add)
+        if (sellData.p) ChangePermanentBlacklist(actualItemName, add);
+        else ChangeTemporaryBlacklist(actualItemName, add);
+    }
+
+    /// <summary>
+    /// Displays a list of item ```names``` in chat
+    /// </summary>
+    /// <param name="items"></param>
+    /// <param name="title"></param>
+    /// <param name="normalColor"></param>
+    /// <param name="errorColor"></param>
+    /// <param name="noNameText"></param>
+    protected static void ItemDisplay(IEnumerable<string> items, string title, string normalColor = "#00ffff", string errorColor = "#ff0000", string noNameText = "MISSING NAME")
+    {
+        if (items.IsNullOrEmpty()) return;
+
+        string itemName;
+        string printout = "";
+        foreach (string name in items)
         {
-            if (QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
-            {
-                QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the blacklist");
-                ChatCommandAPI.ChatCommandAPI.Print($"\"{actualItemName}\" is already in the blacklist");
-                return;
-            }
+            itemName = GetActualItemByName(name).itemName;
+            if (itemName != "") printout += $"<color={normalColor}>{itemName} ({name})</color>\n";
+            else printout += $"<color={errorColor}>{noNameText} ({name})</color>\n";
+        }
 
-            QuickSell.Logger.LogDebug($"Before adding: {QuickSell.Instance.itemBlacklistConfig.Value}");
+        QuickSell.FancyChatDisplay(printout, title, false);
+    }
+
+    /// <summary>
+    /// Checks if the item provided exists in the allItems list with any of the names and spits out a prefab of it
+    /// </summary>
+    /// <param name="itemName"></param>
+    /// <returns></returns>
+    protected static (string prefabName, string name, string itemName, string scanNodeName)
+    GetActualItemByName(string itemName) =>
+        QuickSell.allItems
+            .Where(i =>
+                new[] { i.prefabName, i.name, i.itemName, i.scanNodeName }
+                    .Any(j => j != null && j.Equals(itemName, StringComparison.OrdinalIgnoreCase)))
+            .DefaultIfEmpty(("", "", "", ""))
+            .First();
+
+    /// <summary>
+    /// Checks if holding an item and gives its name with itemName
+    /// </summary>
+    /// <param name="itemName">The name of a held item</param>
+    /// <returns>true if an item is being held and false otherwise</returns>
+    protected static bool CheckHeldItem(out string itemName)
+    {
+        itemName = "";
+
+        var player = StartOfRound.Instance.localPlayerController;
+
+        if (player == null)
+        {
+            QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
+            ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
+            return false;
+        }
+
+        var heldItem = player.ItemSlots[player.currentItemSlot];
+
+        if (heldItem == null || heldItem.name == "")
+        {
+            QuickSell.Logger.LogDebug("No item is held and no item was specified");
+            ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
+            return false;
+        }
+
+        itemName = RemoveClone(heldItem.name);
+        return true;
+    }
+
+    protected static void BlacklistDisplay()
+    {
+        QuickSell.Logger.LogDebug($"No arguments were specified -> calling BlacklistDisplay()");
+        ItemDisplay(QuickSell.Instance.ItemBlacklistSet, "BLACKLIST");
+    }
+
+    protected static void TempBlacklistDisplay()
+    {
+        QuickSell.Logger.LogDebug($"No arguments were specified (but without -p) -> TempBlacklistDisplay()");
+
+        if (sellData.a)
+        {
+            ItemDisplay(QuickSell.Instance.TempBlacklistRmSet, "TEMPORARY UNBLACKLISTED");
+            ItemDisplay(QuickSell.Instance.TempBlacklistAddSet, "TEMPORARY BLACKLIST");
+        }
+
+        ItemDisplay(QuickSell.Instance.ActiveBlacklistSet, "ACTIVE BLACKLIST");
+    }
+    
+    protected static void ChangePermanentBlacklist(string actualItemName, bool add)
+    {
+        if (add && QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent blacklist");
+            return;
+        }
+        else if (add)
+        {
             QuickSell.Instance.ItemBlacklistSet.Add(actualItemName);
-            QuickSell.Instance.UpdateBlacklist = false;
-            QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
-            QuickSell.Instance.UpdateBlacklist = true;
-            QuickSell.Logger.LogDebug($"After adding: {QuickSell.Instance.itemBlacklistConfig.Value}");
 
-            ChatCommandAPI.ChatCommandAPI.Print($"Successfully blacklisted \"{actualItemName}\"");
+            QuickSell.FancyChatDisplay($"Successfully permanently blacklisted \"{actualItemName}\"");
+        }
+        else if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent blacklist");
+            return;
         }
         else
         {
-            if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
-            {
-                QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the blacklist");
-                ChatCommandAPI.ChatCommandAPI.Print($"\"{actualItemName}\" is not in the blacklist");
-                return;
-            }
-
-            QuickSell.Logger.LogDebug($"Before remove: {QuickSell.Instance.itemBlacklistConfig.Value}");
             QuickSell.Instance.ItemBlacklistSet.Remove(actualItemName);
-            QuickSell.Instance.UpdateBlacklist = false;
-            QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
-            QuickSell.Instance.UpdateBlacklist = true;
-            QuickSell.Logger.LogDebug($"After remove: {QuickSell.Instance.itemBlacklistConfig.Value}");
 
-            ChatCommandAPI.ChatCommandAPI.Print($"Successfully removed \"{actualItemName}\" from the blacklist");
+            QuickSell.FancyChatDisplay($"Successfully removed \"{actualItemName}\" from the permanent blacklist");
         }
+
+        QuickSell.Logger.LogDebug($"Config before: {QuickSell.Instance.itemBlacklistConfig.Value}");
+        QuickSell.Instance.UpdateBlacklist = false;
+        QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
+        QuickSell.Instance.UpdateBlacklist = true;
+        QuickSell.Logger.LogDebug($"Config after: {QuickSell.Instance.itemBlacklistConfig.Value}");
+
+        QuickSell.Instance.RebuildActiveBlacklist();
     }
 
-    // Checks if the item provided exists in the allItems list with any of the names and spits out a prefab name
-    protected static string GetActualItemName(string itemName) =>
-        QuickSell.allItems.FirstOrDefault(
-            i => Enumerable.Select([i.prefabName, i.name, i.itemName, i.scanNodeName], j => j.ToLower())
-            .Contains(itemName.ToLower())
-        ).prefabName;
+    protected static void ChangeTemporaryBlacklist(string actualItemName, bool add)
+    {
+        if (add && QuickSell.Instance.TempBlacklistAddSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in a temporary blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in a temporary blacklist");
+            return;
+        }
+        else if (add)
+        {
+            QuickSell.Instance.TempBlacklistRmSet.Remove(actualItemName);
+            QuickSell.Instance.TempBlacklistAddSet.Add(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully temporarily blacklisted \"{actualItemName}\"");
+        }
+        else if (QuickSell.Instance.TempBlacklistRmSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the temporary set to remove blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily removed from being blacklisted");
+            return;
+        }
+        else
+        {
+            QuickSell.Instance.TempBlacklistRmSet.Add(actualItemName);
+            QuickSell.Instance.TempBlacklistAddSet.Remove(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully removed \"{actualItemName}\" from a temporary blacklist");
+        }
+
+        QuickSell.Instance.RebuildActiveBlacklist();
+    }
 
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
     protected static async void SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
@@ -695,9 +854,7 @@ public class SellCommand : Command
         int calculatedOvertime = sellData.o || sellData.variation == "all" ? FindOvertime(items.Sum(obj => obj.scrapValue), sellData.quotaLeft, sellData.n) : 0;
 
         // The printout of the selling results
-        ChatCommandAPI.ChatCommandAPI.Print(
-            $"==============================\n" +
-
+        QuickSell.FancyChatDisplay(
             $"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(items)}" +
 
             $"{(
@@ -707,7 +864,7 @@ public class SellCommand : Command
             )}" +
 
             $"{(
-                sellData.t
+                sellData.e
                 ? $" + {sellData.existingMoney} existing money"
                 : ""
             )}" +
@@ -715,10 +872,8 @@ public class SellCommand : Command
             $"{(
                 sellData.originalValue != ""
                 ? $":\n{items.Sum(obj => obj.scrapValue) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
-                : ", sold every unfiltered item"
-            )}" +
-
-            $"\n=============================="
+                : $", sold every {(sellData.a ? "" : "unfiltered ")}item"
+            )}"
         );
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
@@ -1013,7 +1168,7 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"Calling FilterItems({NumberOfItems(items.Count())})");
         if (ignoreBlacklist) QuickSell.Logger.LogDebug($"Ignoring blacklist");
-        else QuickSell.Logger.LogDebug($"Blacklisted items: {QuickSell.Instance.ItemBlacklistSet.Join()}");
+        else QuickSell.Logger.LogDebug($"Blacklisted items: {QuickSell.Instance.ActiveBlacklistSet.Join()}");
 
         return [.. items
             .Where(i => i is
@@ -1025,7 +1180,7 @@ public class SellCommand : Command
                 }
                 && !sellData.desk.itemsOnCounter.Contains(i)
             )
-            .Where(i => !QuickSell.Instance.ItemBlacklistSet.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
+            .Where(i => !QuickSell.Instance.ActiveBlacklistSet.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
     }
 
     protected static GrabbableObject[] FindItems(GrabbableObject[] items, string itemName)
@@ -1072,7 +1227,7 @@ public class OvertimeCommand : Command
         QuickSell.Logger.LogDebug($"The overtime command was initiated");
         error = "it should not happen";
         int realDeadline = SellCommand.GetDeadline(args.Length > 0 && args[0] == "-n");
-        ChatCommandAPI.ChatCommandAPI.Print($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}");
+        QuickSell.FancyChatDisplay($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}");
 
         ChatCommandAPI.ChatCommandAPI.Print(QuickSell.allItems.Select(i => $"{i.prefabName} : {i.name} : {i.itemName} : {i.scanNodeName}").Join(delimiter: "\n"));
         ChatCommandAPI.ChatCommandAPI.Print(args.Join(delimiter: "\n"));
