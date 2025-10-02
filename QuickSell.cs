@@ -3,53 +3,55 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using ChatCommandAPI;
 using HarmonyLib;
-using Steamworks.Ugc;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using Unity.Netcode;
 using UnityEngine;
-using UnityEngine.Bindings;
-using UnityEngine.TerrainUtils;
 using Object = UnityEngine.Object;
 
 namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
-public class QuickSell : BaseUnityPlugin
+public class QuickSell : BaseUnityPlugin  // Add blacklist help
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;
 
-    private ConfigEntry<string> itemBlacklist = null!;
-    private ConfigEntry<string> priorityItems = null!;
-    internal string[] ItemBlacklist => CommaSplit(itemBlacklist.Value);
-    internal string[] PriorityItems => CommaSplit(priorityItems.Value);
+    internal ConfigEntry<string> itemBlacklistConfig = null!;
+    internal HashSet<string> ItemBlacklistSet = [];
+    internal bool UpdateBlacklist = false;
 
-    public static HashSet<Item> allItems = [];
+    internal ConfigEntry<string> priorityItemsConfig = null!;
+    internal HashSet<string> PriorityItemsSet = [];
+
+    public static List<(string prefabName, string name, string itemName, string scanNodeName)> allItems = [];
 
     private void Awake()
     {
         Logger = base.Logger;
         Instance = this;
 
-        itemBlacklist = Config.Bind(
+        itemBlacklistConfig = Config.Bind(
             "Items",
             "ItemBlacklist",
             CommaJoin(["ShotgunItem", "KnifeItem", "ZeddogPlushie", "GiftBox"]),
             "Items to never sell by internal name (comma-separated)"
         );
-        priorityItems = Config.Bind(
+        priorityItemsConfig = Config.Bind(
             "Items",
             "PriorityItems",
             CommaJoin(["Clock", "EasterEgg", "SoccerBall", "WhoopieCushion"]),
             "Items which are prioritized when selling"
         );
+
+        RebuildBlacklistSet();
+        PriorityItemsSet = CommaSplit(priorityItemsConfig.Value);
+        UpdateBlacklist = true;
+        itemBlacklistConfig.SettingChanged += (_, _) => RebuildBlacklistSet();
 
         _ = new SellCommand();
         _ = new OvertimeCommand();
@@ -57,12 +59,38 @@ public class QuickSell : BaseUnityPlugin
 
         harmony.PatchAll();
 
-        Logger.LogInfo($"{MyPluginInfo.PLUGIN_GUID} v{MyPluginInfo.PLUGIN_VERSION} has loaded!");
+        Logger.LogInfo($"{MyPluginInfo.PLUGIN_GUID} v{MyPluginInfo.PLUGIN_VERSION} was loaded!");
     }
 
-    private static string CommaJoin(string[] i) => i.Join(delimiter: ",");
 
-    private static string[] CommaSplit(string i) => [.. i.Split(',').Select(i => i.Trim())];
+    public static void OnLobbyEntrance()
+    {
+        Logger.LogDebug("Calling OnLobbyEntrance()");
+        Logger.LogDebug("Creating allItems list");
+
+        // Add all possible items to List<item name, prefab name, scan node name>
+        allItems =
+        [..
+            Resources.FindObjectsOfTypeAll<Item>()
+            .Where(i => i.spawnPrefab && "box" != i.itemName)
+            .Select(i => (i.spawnPrefab.name, i.name, i.itemName, i.spawnPrefab.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? ""))
+        ];
+
+        Logger.LogDebug($"allItems list created. Length: {allItems.Count}");
+    }
+
+    private void RebuildBlacklistSet()
+    {
+        if (!UpdateBlacklist) return;
+        QuickSell.Logger.LogDebug($"Constructing a new blacklist");
+        QuickSell.Logger.LogDebug($"Old blacklist: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+        ItemBlacklistSet = CommaSplit(itemBlacklistConfig.Value);
+        QuickSell.Logger.LogDebug($"New blacklist: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+    }
+
+    internal static string CommaJoin(HashSet<string> i) => i.Join(delimiter: ",");
+
+    internal static HashSet<string> CommaSplit(string i) => [.. i.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim())];
 }
  
 public class SellCommand : Command
@@ -132,7 +160,9 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug("Calling ParseArguments()");
 
-        if (sellData.args.Length == 0) return;
+        if (sellData.args.Length == 0 || sellData.args[0] == "") return;
+
+        sellData.args = [.. sellData.args.Where(i => i != "")];
 
         // Parsing variation
         string probableVariation = sellData.args[0].ToLower();
@@ -359,7 +389,7 @@ public class SellCommand : Command
         }
         else
         {
-            itemName = sellData.args[1];
+            itemName = GetActualItemName(sellData.args[1]);
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
         }
 
@@ -536,38 +566,92 @@ public class SellCommand : Command
             return;
         }
 
-        string itemName;
-        if (new string[] { "add", "a", "+" }.Contains(sellData.args[1]))
+        // Checking if we should add or remove from the config
+        bool add;
+        if (new string[] { "add", "ad", "a", "+" }.Contains(sellData.args[1])) add = true;
+        else if (new string[] { "remove", "rm", "r", "-" }.Contains(sellData.args[1])) add = false;
+        else
         {
-            if (sellData.args.Length <= 2)
+            QuickSell.Logger.LogDebug($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
+            return;
+        }
+
+        // Checking what item name to use
+        string actualItemName;
+        if (sellData.args.Length <= 2)
+        {
+            var player = StartOfRound.Instance.localPlayerController;
+
+            if (player == null)
             {
-                var player = StartOfRound.Instance.localPlayerController;
-
-                if (player == null)
-                {
-                    QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
-                    ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
-                    return;
-                }
-
-                var heldItem = player.ItemSlots[player.currentItemSlot];
-
-                if (heldItem == null || heldItem.name == "")
-                {
-                    QuickSell.Logger.LogDebug("No item is held and no item was specified");
-                    ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
-                    return;
-                }
-
-                itemName = RemoveClone(heldItem.name);
+                QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
+                ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
+                return;
             }
-            else
+
+            var heldItem = player.ItemSlots[player.currentItemSlot];
+
+            if (heldItem == null || heldItem.name == "")
             {
-                itemName = sellData.args[1];
+                QuickSell.Logger.LogDebug("No item is held and no item was specified");
+                ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
+                return;
             }
-            QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
+
+            actualItemName = RemoveClone(heldItem.name);
+        }
+        else
+        {
+            actualItemName = GetActualItemName(sellData.args[2]);
+        }
+        QuickSell.Logger.LogDebug($"Item to blacklist: {actualItemName}");
+
+        // Adding/removing to/from config
+        if (add)
+        {
+            if (QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+            {
+                QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the blacklist");
+                ChatCommandAPI.ChatCommandAPI.Print($"\"{actualItemName}\" is already in the blacklist");
+                return;
+            }
+
+            QuickSell.Logger.LogDebug($"Before adding: {QuickSell.Instance.itemBlacklistConfig.Value}");
+            QuickSell.Instance.ItemBlacklistSet.Add(actualItemName);
+            QuickSell.Instance.UpdateBlacklist = false;
+            QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
+            QuickSell.Instance.UpdateBlacklist = true;
+            QuickSell.Logger.LogDebug($"After adding: {QuickSell.Instance.itemBlacklistConfig.Value}");
+
+            ChatCommandAPI.ChatCommandAPI.Print($"Successfully blacklisted \"{actualItemName}\"");
+        }
+        else
+        {
+            if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+            {
+                QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the blacklist");
+                ChatCommandAPI.ChatCommandAPI.Print($"\"{actualItemName}\" is not in the blacklist");
+                return;
+            }
+
+            QuickSell.Logger.LogDebug($"Before remove: {QuickSell.Instance.itemBlacklistConfig.Value}");
+            QuickSell.Instance.ItemBlacklistSet.Remove(actualItemName);
+            QuickSell.Instance.UpdateBlacklist = false;
+            QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
+            QuickSell.Instance.UpdateBlacklist = true;
+            QuickSell.Logger.LogDebug($"After remove: {QuickSell.Instance.itemBlacklistConfig.Value}");
+
+            ChatCommandAPI.ChatCommandAPI.Print($"Successfully removed \"{actualItemName}\" from the blacklist");
         }
     }
+
+    // Checks if the item provided exists in the allItems list with any of the names and spits out a prefab name
+    protected static string GetActualItemName(string itemName) =>
+        QuickSell.allItems.FirstOrDefault(
+            i => Enumerable.Select([i.prefabName, i.name, i.itemName, i.scanNodeName], j => j.ToLower())
+            .Contains(itemName.ToLower())
+        ).prefabName;
 
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
     protected static async void SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
@@ -715,7 +799,7 @@ public class SellCommand : Command
 
         reachable[0] = true; // Even with no items on ship 0 value would be reachable
 
-        QuickSell.Logger.LogDebug($"Items with priority: {QuickSell.Instance.PriorityItems.Join(delimiter: ", ")}");
+        QuickSell.Logger.LogDebug($"Items with priority: {QuickSell.Instance.PriorityItemsSet.Join(delimiter: ", ")}");
         QuickSell.Logger.LogDebug("Starting looping through every item");
         foreach (var item in items)
         {
@@ -921,7 +1005,7 @@ public class SellCommand : Command
                 : $" ({(int)(totalValue * StartOfRound.Instance.companyBuyingRate)})"
         );
     
-    protected static bool IsPriority(GrabbableObject item) => QuickSell.Instance.PriorityItems.Contains(RemoveClone(item.name), StringComparer.OrdinalIgnoreCase);
+    protected static bool IsPriority(GrabbableObject item) => QuickSell.Instance.PriorityItemsSet.Contains(RemoveClone(item.name), StringComparer.OrdinalIgnoreCase);
 
     protected static string RemoveClone(string name, string cloneString = "(Clone)") => name.EndsWith(cloneString) ? name[..^cloneString.Length] : name;
 
@@ -929,7 +1013,7 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"Calling FilterItems({NumberOfItems(items.Count())})");
         if (ignoreBlacklist) QuickSell.Logger.LogDebug($"Ignoring blacklist");
-        else QuickSell.Logger.LogDebug($"Blacklisted items: {QuickSell.Instance.ItemBlacklist.Join()}");
+        else QuickSell.Logger.LogDebug($"Blacklisted items: {QuickSell.Instance.ItemBlacklistSet.Join()}");
 
         return [.. items
             .Where(i => i is
@@ -941,7 +1025,7 @@ public class SellCommand : Command
                 }
                 && !sellData.desk.itemsOnCounter.Contains(i)
             )
-            .Where(i => !QuickSell.Instance.ItemBlacklist.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
+            .Where(i => !QuickSell.Instance.ItemBlacklistSet.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
     }
 
     protected static GrabbableObject[] FindItems(GrabbableObject[] items, string itemName)
@@ -990,8 +1074,8 @@ public class OvertimeCommand : Command
         int realDeadline = SellCommand.GetDeadline(args.Length > 0 && args[0] == "-n");
         ChatCommandAPI.ChatCommandAPI.Print($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}");
 
-        QuickSell.allItems = [.. Resources.FindObjectsOfTypeAll<Item>().Where(item => item.spawnPrefab && "box" != item.itemName)];
-        ChatCommandAPI.ChatCommandAPI.Print(QuickSell.allItems.Select(i => $"{i.itemName} : {i.spawnPrefab.name} : {i.spawnPrefab.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "*NULL*"}").Join(delimiter: "\n"));
+        ChatCommandAPI.ChatCommandAPI.Print(QuickSell.allItems.Select(i => $"{i.prefabName} : {i.name} : {i.itemName} : {i.scanNodeName}").Join(delimiter: "\n"));
+        ChatCommandAPI.ChatCommandAPI.Print(args.Join(delimiter: "\n"));
 
 
         QuickSell.Logger.LogDebug($"Terminating");

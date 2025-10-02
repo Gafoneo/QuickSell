@@ -7,6 +7,24 @@ public class Patches
 {
     public static int valueOnDesk;
 
+    [HarmonyPatch(typeof(GameNetworkManager))]
+    public class LobbyPatches
+    {
+        [HarmonyPatch("StartHost")]
+        [HarmonyPostfix]
+        static void OnLobbyCreated()
+        {
+            QuickSell.OnLobbyEntrance();
+        }
+
+        [HarmonyPatch("StartClient")]
+        [HarmonyPostfix]
+        static void OnLobbyJoined()
+        {
+            QuickSell.OnLobbyEntrance();
+        }
+    }
+
     // Thanks to NutNutty for these patches:
     [HarmonyPatch(typeof(DepositItemsDesk))]
     public class DepositItemsDeskPatch
