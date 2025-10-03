@@ -183,8 +183,11 @@ By using `/sell bl empty` you can clear temporary blacklist in case you don't ne
 Usage:
 
 `/sell pr [-a] [-p]`
+
 `/sell pr {add | ad | a | +} [itemName] [-p]`
+
 `/sell pr {remove | rm | r | -} [itemName] [-p]`
+
 `/sell pr {empty | flash | flush}`
                 
 Without modifiers just prints an active priority set, you can add -a to also display temporary priority set or -p to display permanent priority set instead.
