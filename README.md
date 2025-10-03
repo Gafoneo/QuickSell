@@ -1,8 +1,8 @@
-﻿# QuickSell
+# QuickSell
 
-[ENGLISH DOCUMENTATION](README.md)
+[ENGLISH DOCUMENTATION](https://github.com/Gafoneo/QuickSell/blob/main/README.md)
 
-[РУССКАЯ ДОКУМЕНТАЦИЯ](README_ru.md)
+[РУССКАЯ ДОКУМЕНТАЦИЯ](https://github.com/Gafoneo/QuickSell/blob/main/README_ru.md)
 
 ## Description:
 
@@ -264,12 +264,16 @@ Forces EVERY overtime calculation that occures during the execution of THIS comm
 
 You landed on comapany after playing your final day of the 2nd quota, the quota is 256, you have 4 leftover credits in terminal and plan to buy jetpack (900), weed killer (25*2) and go to Artifice (1500). You can just use `/sell 900+25*2+1500 -eo`. The mod will try to sell 2094, the overtime because of that will be 352 and there already are 4 credits in terminal so overall it will be 2094+352+4=2450, exactly as requested. Then suppose you bought a jetpack and two weed killers and noted that you don't have any shovels so you decide to buy two of them (30*2). Now you can use `/sell 60 -o` to ignore how many credits and overtime you already have and get 60 more of credits+overtime. The mod will try to sell 50 and the overtime gained because of that will be 10, so overall it will be 60, exactly as requested.
 
+
+## Reporting issues/feature requests
+If you want to report a bug or request a new feature welcome to my [GitHub](https://github.com/Gafoneo/QuickSell/issues)
+
 ## Credits
 
-- Thanks to **baer1** for YetAnotherSellMod which this mod originated from
+### Thanks to baer1 for YetAnotherSellMod which this mod originated from
 
-- Also thanks to **baer1** for ChatCommandAPI which was a very good tool to make chat commands with
+### Also thanks to baer1 for ChatCommandAPI which was a very good tool to make chat commands with
 
-- Thanks to **Zehs** for SellMyScrap which became a huge inspiration for me
+### Thanks to Zehs for SellMyScrap which became a huge inspiration for me
 
-- Thanks to **NutNutty** for logic in SellTracker which allows to track items on the desk on client
+### Thanks to NutNutty for logic in SellTracker which allows to track items on the desk on client
