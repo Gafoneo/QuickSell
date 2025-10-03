@@ -17,7 +17,7 @@ namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
-public class QuickSell : BaseUnityPlugin  // Add priority help, add ability to write temporary blacklist and priority into the permanent one, update readme file
+public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;

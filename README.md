@@ -1,4 +1,8 @@
-# QuickSell
+﻿# QuickSell
+
+[ENGLISH DOCUMENTATION](README.md)
+
+[РУССКАЯ ДОКУМЕНТАЦИЯ](README_ru.md)
 
 ## Description:
 
@@ -94,7 +98,7 @@ There is specific information on each command and its usage in the in-game docum
 
 - `-a` `(all)` to ignore blacklist (used with quota, all, <amount>)
 
-- `-p` `(permanent)` when using `/sell bl` allows you to affect permanent blacklist instead of the temporary one
+- `-p` `(permanent)` when using `/sell {bl | pr}` allows you to affect permanent set instead of the temporary one
 
 - `-n` `(nonrestart)` to FORSE non-restart overtime calculations (needed in very rare edge cases with late joining mods after late joining as a client)
 
@@ -152,7 +156,7 @@ Usage:
 
 `/sell all [-a]`
 
-Sells all (non-blacklisted, use -a to ignore blacklist) items
+Sells all (non-blacklisted, use -a to ignore blacklist) scrap items
 
 #### Amount
 
@@ -215,7 +219,9 @@ Usage:
 
 `/sell <amount> -o`
 
-Respects the fact that your sold items can cause overtime and includes it in the calculations (note that the overtime caused by already sold items isn't included, you need -e flag for that) so that: requested value = final value in terminal (after leaving the planet) - existing money (look into -e help page for that)
+Respects the fact that your sold items can cause overtime and includes it in the calculations (note that the overtime caused by already sold items isn't included, you need -e flag for that) so that:
+
+requested value = final value in terminal (after leaving the planet) - existing money (look into -e page for that)
 
 ### -e
 
@@ -224,7 +230,9 @@ Usage:
 `/sell <amount> -e`
 
 (Previously -t, but was changed to -e)
-Removes existing money (already existing credits in terminal, items on desk and, if -o flag is present, future overtime based on these two) from your requsted value so that: requested value = final value in terminal (after leaving the planet) = existing money + sold items (+ overtime caused by sold items if -o flag is present)
+Removes existing money (already existing credits in terminal, items on desk and, if -o flag is present, future overtime based on these two) from your requsted value so that:
+
+requested value = final value in terminal (after leaving the planet) = existing money + sold items (+ overtime caused by sold items if -o flag is present)
 
 ### -a
 
@@ -258,10 +266,10 @@ You landed on comapany after playing your final day of the 2nd quota, the quota 
 
 ## Credits
 
-### Thanks to baer1 for YetAnotherSellMod which this mod originated from
+- Thanks to **baer1** for YetAnotherSellMod which this mod originated from
 
-### Also thanks to baer1 for ChatCommandAPI which was a very good tool to make chat commands with
+- Also thanks to **baer1** for ChatCommandAPI which was a very good tool to make chat commands with
 
-### Thanks to Zehs for SellMyScrap which became a huge inspiration for me
+- Thanks to **Zehs** for SellMyScrap which became a huge inspiration for me
 
-### Thanks to NutNutty for logic in SellTracker which allows to track items on the desk on client
+- Thanks to **NutNutty** for logic in SellTracker which allows to track items on the desk on client
