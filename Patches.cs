@@ -15,6 +15,7 @@ public class Patches
         static void OnLobbyCreated()
         {
             QuickSell.OnLobbyEntrance();
+            valueOnDesk = 0;
         }
 
         [HarmonyPatch("StartClient")]
@@ -22,6 +23,7 @@ public class Patches
         static void OnLobbyJoined()
         {
             QuickSell.OnLobbyEntrance();
+            valueOnDesk = 0;
         }
     }
 

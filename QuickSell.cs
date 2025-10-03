@@ -1449,11 +1449,7 @@ public class OvertimeCommand : Command
         QuickSell.Logger.LogDebug($"The overtime command was initiated");
         error = "it should not happen";
         int realDeadline = SellCommand.GetDeadline(args.Length > 0 && args[0] == "-n");
-        QuickSell.FancyChatDisplay($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}");
-
-        ChatCommandAPI.ChatCommandAPI.Print(QuickSell.allItems.Select(i => $"{i.prefabName} : {i.name} : {i.itemName} : {i.scanNodeName}").Join(delimiter: "\n"));
-        ChatCommandAPI.ChatCommandAPI.Print(args.Join(delimiter: "\n"));
-
+        QuickSell.FancyChatDisplay($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}", "OVERTIME");
 
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
