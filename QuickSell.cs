@@ -17,7 +17,7 @@ namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
-public class QuickSell : BaseUnityPlugin  // Add blacklist help, also note the -a and -p flags, add ability to write temporary blacklist into the permanent one, update readme file
+public class QuickSell : BaseUnityPlugin  // Add priority help, add ability to write temporary blacklist and priority into the permanent one, update readme file
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;
@@ -26,11 +26,15 @@ public class QuickSell : BaseUnityPlugin  // Add blacklist help, also note the -
     internal HashSet<string> ItemBlacklistSet = [];
     internal HashSet<string> TempBlacklistAddSet = [];
     internal HashSet<string> TempBlacklistRmSet = [];
-    internal HashSet<string> ActiveBlacklistSet = [];  // Add implementation
-    internal bool UpdateBlacklist = false;
+    internal HashSet<string> ActiveBlacklistSet = [];
+    internal bool UpdateBlacklist = true;
 
     internal ConfigEntry<string> priorityItemsConfig = null!;
     internal HashSet<string> PriorityItemsSet = [];
+    internal HashSet<string> TempPriorityAddSet = [];
+    internal HashSet<string> TempPriorityRmSet = [];
+    internal HashSet<string> ActivePrioritySet = [];
+    internal bool UpdatePriority = true;
 
     public static List<(string prefabName, string name, string itemName, string scanNodeName)> allItems = [];
 
@@ -52,10 +56,11 @@ public class QuickSell : BaseUnityPlugin  // Add blacklist help, also note the -
             "Items which are prioritized when selling"
         );
 
-        UpdateBlacklist = true;
         RebuildBlacklistSet();
-        PriorityItemsSet = CommaSplit(priorityItemsConfig.Value);
         itemBlacklistConfig.SettingChanged += (_, _) => RebuildBlacklistSet();
+
+        RebuildPrioritySet();
+        priorityItemsConfig.SettingChanged += (_, _) => RebuildPrioritySet();
 
         _ = new SellCommand();
         _ = new OvertimeCommand();
@@ -87,14 +92,27 @@ public class QuickSell : BaseUnityPlugin  // Add blacklist help, also note the -
     {
         if (!UpdateBlacklist) return;
         QuickSell.Logger.LogDebug($"Constructing a new blacklist");
-        QuickSell.Logger.LogDebug($"Old blacklist set: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+        QuickSell.Logger.LogDebug($"Old blacklist set: {string.Join(",", ItemBlacklistSet)}");
         ItemBlacklistSet = CommaSplit(itemBlacklistConfig.Value);
         RebuildActiveBlacklist();
-        QuickSell.Logger.LogDebug($"New blacklist set: {string.Join(",", QuickSell.Instance.ItemBlacklistSet)}");
+        QuickSell.Logger.LogDebug($"New blacklist set: {string.Join(",", ItemBlacklistSet)}");
     }
 
     public void RebuildActiveBlacklist() =>
         ActiveBlacklistSet = [.. ItemBlacklistSet.Union(TempBlacklistAddSet).Except(TempBlacklistRmSet)];
+
+    public void RebuildPrioritySet()
+    {
+        if (!UpdatePriority) return;
+        QuickSell.Logger.LogDebug($"Constructing a new priority set");
+        QuickSell.Logger.LogDebug($"Old priority set: {string.Join(",", PriorityItemsSet)}");
+        PriorityItemsSet = CommaSplit(priorityItemsConfig.Value);
+        RebuildActivePrioritySet();
+        QuickSell.Logger.LogDebug($"New priority set: {string.Join(",", PriorityItemsSet)}");
+    }
+
+    public void RebuildActivePrioritySet() =>
+        ActivePrioritySet = [.. PriorityItemsSet.Union(TempPriorityAddSet).Except(TempPriorityRmSet)];
 
     internal static string CommaJoin(HashSet<string> i) => i.Join(delimiter: ",");
 
@@ -185,6 +203,7 @@ public class SellCommand : Command
     {
         { "help", SellHelp },
         { "blacklist", SellBlacklist },
+        { "priority", SellPriority },
         { "", CompleteOnlyWithDesk(SellNoArgs) },
         { "item", CompleteOnlyWithDesk(SellParticularItem) },
         { "quota", CompleteOnlyWithDesk(SellQuota) },
@@ -239,6 +258,7 @@ public class SellCommand : Command
         else if (new string[] { "quota" }.Contains(probableVariation)) sellData.variation = "quota";
         else if (new string[] { "all" }.Contains(probableVariation)) sellData.variation = "all";
         else if (new string[] { "blacklist", "bl" }.Contains(probableVariation)) sellData.variation = "blacklist";
+        else if (new string[] { "priority", "pr" }.Contains(probableVariation)) sellData.variation = "priority";
         else sellData.variation = "amount";
 
         QuickSell.Logger.LogDebug($"variation: {(sellData.variation == "amount" ? "no variation keyword was used so assuming <amount>" : sellData.variation)}");
@@ -344,15 +364,10 @@ public class SellCommand : Command
                 Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that
                 """
             },
-            {  // Relocate some of that to the readme file
+            {
                 "blacklist",
                 """
-                The blacklist tells the mod which items not to sell. There are three kinds of it: permanent, temporary(add), temporary(remove) and active.
-                - Permanent blacklist loads itself from the config at the start of the game. Although it's possible, I wouldn't recommend to modify the config by yourself, instead modify the permanent blacklist through in-game commands explained later (to avoid any user-made errors).
-                - Temporary blacklists (they only act together but there are two of them) are created when you launch Lethal Company and are destroyed when you close it. You can freely add/remove something from them and they will impact what you sell until you close the game or empty them.
-                - Active blacklist is the combination of the two. It takes the permanent blacklist, adds to it temporary(add) and removes temporary(remove) from it. It's the one which is ACTUALLY used to decide which items not to sell.
-
-                Command usage:
+                Usage:
                 /sell bl [-a] [-p]
                 /sell bl {add | ad | a | +} [itemName] [-p]
                 /sell bl {remove | rm | r | -} [itemName] [-p]
@@ -360,7 +375,21 @@ public class SellCommand : Command
                 
                 Without modifiers just prints an active blacklist, you can add -a to also display temporary blacklist or -p to display permanent blacklist instead.
                 By using "/sell bl +" ("/sell bl -") you can temporarily blacklist (or prohibit to blacklist) an item currently in your hands. You can also add/remove it from a permanent blacklist by using -p flag.
-                By using "/sell bl empty" you can clear both temporary blacklists in case you don't need them anymore (keep in mind that they are automatically reset when you close the game window)
+                By using "/sell bl empty" you can clear temporary blacklist in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
+                """
+            },
+            {
+                "priority",
+                """
+                Usage:
+                /sell pr [-a] [-p]
+                /sell pr {add | ad | a | +} [itemName] [-p]
+                /sell pr {remove | rm | r | -} [itemName] [-p]
+                /sell pr {empty | flash | flush}
+                
+                Without modifiers just prints an active priority set, you can add -a to also display temporary priority set or -p to display permanent priority set instead.
+                By using "/sell pr +" ("/sell bl -") you can temporarily prioritize (or prohibit form being prioritized) an item currently in your hands. You can also add/remove it from a permanent priority set by using -p flag.
+                By using "/sell pr empty" you can clear temporary priority set in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
                 """
             },
             {
@@ -386,9 +415,18 @@ public class SellCommand : Command
                 "-a",
                 """
                 Usage:
-                /sell <quota | all | amount> -a
+                /sell {quota | all | amount | bl | pr} -a
 
-                When trying to find right items to sell, ignores all blacklists so that *EVERY* item can be sold
+                When trying to find right items to sell, ignores all blacklists so that *EVERY* item can be sold. If used with "/sell bl" or "/sell pr" displays both temporary blacklists (or priority sets) along with the active one
+                """
+            },
+            {
+                "-p",
+                """
+                Usage:
+                /sell {bl | pr} [+ | -] -p
+
+                When using the blacklist (or priority) command can be used to affect permanent blacklist (or priority set) instead of the temporary one
                 """
             },
             {
@@ -397,7 +435,7 @@ public class SellCommand : Command
                 Usage:
                 /sell <amount> -n
 
-                Forces EVERY overtime calculation that occures during the execution of THIS command to think that there was no rehost after the final day of this quota, even if there was one). It is only needed if a host has a mod for late joining (aka LateCompany) and you joined after the final day of this quota (your client will think that there was a rehost then). There is no way (that I know of, at least, if you know one please tell me) to check if there was or wasn't a real rehost in this case, and if there wasn't, then all overtime calculations will be 15 smaller. This flag accounts for that, but note that if the rehost has actually occured and you used this flag then all overtime calculation will be 15 bigger so you should ask your host if they have done a rehost or not to get it right\n" +
+                Forces EVERY overtime calculation that occures during the execution of THIS command to think that there was no rehost after the final day of this quota, even if there was one). It is only needed if a host has a mod for late joining (aka LateCompany) and you joined after the final day of this quota (your client will think that there was a rehost then). There is no way (that I know of, at least, if you know one please tell me) to check if there was or wasn't a real rehost in this case, and if there wasn't, then all overtime calculations will be 15 smaller. This flag accounts for that, but note that if the rehost has actually occured and you used this flag then all overtime calculation will be 15 bigger so you should ask your host if they have done a rehost or not to get it right
                 """
             }
         };
@@ -419,6 +457,9 @@ public class SellCommand : Command
                 return;
             case bool when sellData.a:
                 QuickSell.FancyChatDisplay(pages["-a"], "-A HELP PAGE");
+                return;
+            case bool when sellData.p:
+                QuickSell.FancyChatDisplay(pages["-p"], "-P HELP PAGE");
                 return;
             case bool when sellData.n:
                 QuickSell.FancyChatDisplay(pages["-n"], "-N HELP PAGE");
@@ -450,6 +491,12 @@ public class SellCommand : Command
             case "amount":
             case "<amount>":
                 QuickSell.FancyChatDisplay(pages["amount"], "AMOUNT HELP PAGE");
+                return;
+            case "blacklist":
+                QuickSell.FancyChatDisplay(pages["blacklist"], "BLACKLIST HELP PAGE");
+                return;
+            case "priority":
+                QuickSell.FancyChatDisplay(pages["priority"], "PRIORITY HELP PAGE");
                 return;
         }
 
@@ -634,13 +681,18 @@ public class SellCommand : Command
 
         if (sellData.args.Length <= 1 && sellData.p)
         {
-            BlacklistDisplay();
+            ItemDisplay(QuickSell.Instance.ItemBlacklistSet, "PERMANENT BLACKLIST");
             return;
         }
-
         else if (sellData.args.Length <= 1)
         {
-            TempBlacklistDisplay();
+            if (sellData.a)
+            {
+                ItemDisplay(QuickSell.Instance.TempBlacklistRmSet, "TEMPORARY UNBLACKLISTED");
+                ItemDisplay(QuickSell.Instance.TempBlacklistAddSet, "TEMPORARY BLACKLIST");
+            }
+
+            ItemDisplay(QuickSell.Instance.ActiveBlacklistSet, "ACTIVE BLACKLIST");
             return;
         }
 
@@ -684,6 +736,233 @@ public class SellCommand : Command
 
         if (sellData.p) ChangePermanentBlacklist(actualItemName, add);
         else ChangeTemporaryBlacklist(actualItemName, add);
+    }
+
+    protected static void ChangePermanentBlacklist(string actualItemName, bool add)
+    {
+        if (actualItemName == "")
+        {
+            QuickSell.Logger.LogDebug($"Wrong item name");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            return;
+        }
+
+        if (add && QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent blacklist");
+            return;
+        }
+        else if (add)
+        {
+            QuickSell.Instance.ItemBlacklistSet.Add(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully permanently blacklisted \"{actualItemName}\"");
+        }
+        else if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent blacklist");
+            return;
+        }
+        else
+        {
+            QuickSell.Instance.ItemBlacklistSet.Remove(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully removed \"{actualItemName}\" from the permanent blacklist");
+        }
+
+        QuickSell.Logger.LogDebug($"Config before: {QuickSell.Instance.itemBlacklistConfig.Value}");
+        QuickSell.Instance.UpdateBlacklist = false;
+        QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
+        QuickSell.Instance.UpdateBlacklist = true;
+        QuickSell.Logger.LogDebug($"Config after: {QuickSell.Instance.itemBlacklistConfig.Value}");
+
+        QuickSell.Instance.RebuildActiveBlacklist();
+    }
+
+    protected static void ChangeTemporaryBlacklist(string actualItemName, bool add)
+    {
+        if (actualItemName == "")
+        {
+            QuickSell.Logger.LogDebug($"Wrong item name");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            return;
+        }
+
+        if (add && QuickSell.Instance.TempBlacklistAddSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily blacklisted");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily blacklisted");
+            return;
+        }
+        else if (add)
+        {
+            QuickSell.Instance.TempBlacklistRmSet.Remove(actualItemName);
+            QuickSell.Instance.TempBlacklistAddSet.Add(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully temporarily blacklisted \"{actualItemName}\"");
+        }
+        else if (QuickSell.Instance.TempBlacklistRmSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily prohibited to blacklist");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to blacklist");
+            return;
+        }
+        else
+        {
+            QuickSell.Instance.TempBlacklistRmSet.Add(actualItemName);
+            QuickSell.Instance.TempBlacklistAddSet.Remove(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully temporarily prohibited to blacklist \"{actualItemName}\"");
+        }
+
+        QuickSell.Instance.RebuildActiveBlacklist();
+    }
+
+    protected static void SellPriority()
+    {
+        QuickSell.Logger.LogDebug($"variation == \"priority\" -> calling SellPriority()");
+
+        if (sellData.args.Length <= 1 && sellData.p)
+        {
+            ItemDisplay(QuickSell.Instance.PriorityItemsSet, "PERMANENT PRIORITY SET");
+            return;
+        }
+        else if (sellData.args.Length <= 1)
+        {
+            if (sellData.a)
+            {
+                ItemDisplay(QuickSell.Instance.TempPriorityRmSet, "TEMPORARY UNPRIORITIZED");
+                ItemDisplay(QuickSell.Instance.TempPriorityAddSet, "TEMPORARY PRIORITY SET");
+            }
+
+            ItemDisplay(QuickSell.Instance.ActivePrioritySet, "ACTIVE PRIORITY SET");
+            return;
+        }
+
+        // Checking if we should add or remove from the config
+        bool add;
+        if (new string[] { "add", "ad", "a", "+" }.Contains(sellData.args[1])) add = true;
+        else if (new string[] { "remove", "rm", "r", "-" }.Contains(sellData.args[1])) add = false;
+        else if (new string[] { "empty", "flash", "flush" }.Contains(sellData.args[1]))
+        {
+            if (sellData.p)
+            {
+                QuickSell.Logger.LogDebug($"Denied request to empty permanent priority set");
+                ChatCommandAPI.ChatCommandAPI.PrintError($"The permanent priority set cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
+                return;
+            }
+
+            QuickSell.Instance.TempPriorityAddSet.Clear();
+            QuickSell.Instance.TempPriorityRmSet.Clear();
+            QuickSell.Instance.RebuildActivePrioritySet();
+            QuickSell.FancyChatDisplay("Successfully emptied temporary priority set");
+            return;
+        }
+        else
+        {
+            QuickSell.Logger.LogDebug($"Wrong arguments. If you don't know how to use the command use \"/sell help priority\"");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help priority\"");
+            return;
+        }
+
+        // Checking what item name to use
+        string actualItemName;
+        if (sellData.args.Length <= 2)
+        {
+            if (!CheckHeldItem(out actualItemName)) return;
+        }
+        else
+        {
+            actualItemName = GetActualItemByName(sellData.args[2]).prefabName;
+        }
+        QuickSell.Logger.LogDebug($"Item: {actualItemName}");
+
+        if (sellData.p) ChangePermanentPrioritySet(actualItemName, add);
+        else ChangeTemporaryPrioritySet(actualItemName, add);
+    }
+
+    protected static void ChangePermanentPrioritySet(string actualItemName, bool add)
+    {
+        if (actualItemName == "")
+        {
+            QuickSell.Logger.LogDebug($"Wrong item name");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            return;
+        }
+
+        if (add && QuickSell.Instance.PriorityItemsSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent priority set");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent priority set");
+            return;
+        }
+        else if (add)
+        {
+            QuickSell.Instance.PriorityItemsSet.Add(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully added \"{actualItemName}\" to the permanent priority set");
+        }
+        else if (!QuickSell.Instance.PriorityItemsSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent priority set");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent priority set");
+            return;
+        }
+        else
+        {
+            QuickSell.Instance.PriorityItemsSet.Remove(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully removed \"{actualItemName}\" from the permanent priority set");
+        }
+
+        QuickSell.Logger.LogDebug($"Config before: {QuickSell.Instance.priorityItemsConfig.Value}");
+        QuickSell.Instance.UpdatePriority = false;
+        QuickSell.Instance.priorityItemsConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.PriorityItemsSet);
+        QuickSell.Instance.UpdatePriority = true;
+        QuickSell.Logger.LogDebug($"Config after: {QuickSell.Instance.priorityItemsConfig.Value}");
+
+        QuickSell.Instance.RebuildActivePrioritySet();
+    }
+
+    protected static void ChangeTemporaryPrioritySet(string actualItemName, bool add)
+    {
+        if (actualItemName == "")
+        {
+            QuickSell.Logger.LogDebug($"Wrong item name");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            return;
+        }
+
+        if (add && QuickSell.Instance.TempPriorityAddSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the temporarily priority set");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the temporarily priority set");
+            return;
+        }
+        else if (add)
+        {
+            QuickSell.Instance.TempPriorityRmSet.Remove(actualItemName);
+            QuickSell.Instance.TempPriorityAddSet.Add(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully added \"{actualItemName}\" to the temporary priority set");
+        }
+        else if (QuickSell.Instance.TempPriorityRmSet.Contains(actualItemName))
+        {
+            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily prohibited to prioritize");
+            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to prioritize");
+            return;
+        }
+        else
+        {
+            QuickSell.Instance.TempPriorityRmSet.Add(actualItemName);
+            QuickSell.Instance.TempPriorityAddSet.Remove(actualItemName);
+
+            QuickSell.FancyChatDisplay($"Successfully temporarily prohibited to prioritize \"{actualItemName}\"");
+        }
+
+        QuickSell.Instance.RebuildActivePrioritySet();
     }
 
     /// <summary>
@@ -753,107 +1032,6 @@ public class SellCommand : Command
 
         itemName = RemoveClone(heldItem.name);
         return true;
-    }
-
-    protected static void BlacklistDisplay()
-    {
-        QuickSell.Logger.LogDebug($"No arguments were specified -> calling BlacklistDisplay()");
-        ItemDisplay(QuickSell.Instance.ItemBlacklistSet, "BLACKLIST");
-    }
-
-    protected static void TempBlacklistDisplay()
-    {
-        QuickSell.Logger.LogDebug($"No arguments were specified (but without -p) -> TempBlacklistDisplay()");
-
-        if (sellData.a)
-        {
-            ItemDisplay(QuickSell.Instance.TempBlacklistRmSet, "TEMPORARY UNBLACKLISTED");
-            ItemDisplay(QuickSell.Instance.TempBlacklistAddSet, "TEMPORARY BLACKLIST");
-        }
-
-        ItemDisplay(QuickSell.Instance.ActiveBlacklistSet, "ACTIVE BLACKLIST");
-    }
-    
-    protected static void ChangePermanentBlacklist(string actualItemName, bool add)
-    {
-        if (actualItemName == "")
-        {
-            QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
-            return;
-        }
-
-        if (add && QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
-        {
-            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent blacklist");
-            return;
-        }
-        else if (add)
-        {
-            QuickSell.Instance.ItemBlacklistSet.Add(actualItemName);
-
-            QuickSell.FancyChatDisplay($"Successfully permanently blacklisted \"{actualItemName}\"");
-        }
-        else if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
-        {
-            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent blacklist");
-            return;
-        }
-        else
-        {
-            QuickSell.Instance.ItemBlacklistSet.Remove(actualItemName);
-
-            QuickSell.FancyChatDisplay($"Successfully removed \"{actualItemName}\" from the permanent blacklist");
-        }
-
-        QuickSell.Logger.LogDebug($"Config before: {QuickSell.Instance.itemBlacklistConfig.Value}");
-        QuickSell.Instance.UpdateBlacklist = false;
-        QuickSell.Instance.itemBlacklistConfig.Value = QuickSell.CommaJoin(QuickSell.Instance.ItemBlacklistSet);
-        QuickSell.Instance.UpdateBlacklist = true;
-        QuickSell.Logger.LogDebug($"Config after: {QuickSell.Instance.itemBlacklistConfig.Value}");
-
-        QuickSell.Instance.RebuildActiveBlacklist();
-    }
-
-    protected static void ChangeTemporaryBlacklist(string actualItemName, bool add)
-    {
-        if (actualItemName == "")
-        {
-            QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
-            return;
-        }
-
-        if (add && QuickSell.Instance.TempBlacklistAddSet.Contains(actualItemName))
-        {
-            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily blacklisted");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily blacklisted");
-            return;
-        }
-        else if (add)
-        {
-            QuickSell.Instance.TempBlacklistRmSet.Remove(actualItemName);
-            QuickSell.Instance.TempBlacklistAddSet.Add(actualItemName);
-
-            QuickSell.FancyChatDisplay($"Successfully temporarily blacklisted \"{actualItemName}\"");
-        }
-        else if (QuickSell.Instance.TempBlacklistRmSet.Contains(actualItemName))
-        {
-            QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already prohibited to blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already prohibited to blacklist");
-            return;
-        }
-        else
-        {
-            QuickSell.Instance.TempBlacklistRmSet.Add(actualItemName);
-            QuickSell.Instance.TempBlacklistAddSet.Remove(actualItemName);
-
-            QuickSell.FancyChatDisplay($"Successfully temporarily prohibited to blacklist \"{actualItemName}\"");
-        }
-
-        QuickSell.Instance.RebuildActiveBlacklist();
     }
 
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
@@ -998,7 +1176,7 @@ public class SellCommand : Command
 
         reachable[0] = true; // Even with no items on ship 0 value would be reachable
 
-        QuickSell.Logger.LogDebug($"Items with priority: {QuickSell.Instance.PriorityItemsSet.Join(delimiter: ", ")}");
+        QuickSell.Logger.LogDebug($"Items with priority: {QuickSell.Instance.ActivePrioritySet.Join(delimiter: ", ")}");
         QuickSell.Logger.LogDebug("Starting looping through every item");
         foreach (var item in items)
         {
@@ -1204,7 +1382,7 @@ public class SellCommand : Command
                 : $" ({(int)(totalValue * StartOfRound.Instance.companyBuyingRate)})"
         );
     
-    protected static bool IsPriority(GrabbableObject item) => QuickSell.Instance.PriorityItemsSet.Contains(RemoveClone(item.name), StringComparer.OrdinalIgnoreCase);
+    protected static bool IsPriority(GrabbableObject item) => QuickSell.Instance.ActivePrioritySet.Contains(RemoveClone(item.name), StringComparer.OrdinalIgnoreCase);
 
     protected static string RemoveClone(string name, string cloneString = "(Clone)") => name.EndsWith(cloneString) ? name[..^cloneString.Length] : name;
 
