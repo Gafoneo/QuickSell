@@ -510,7 +510,7 @@ public class SellCommand : Command
         string itemName;
         if (sellData.args.Length <= 1)
         {
-            if (!CheckHeldItem(out itemName))
+            if (!CheckHeldItem(out itemName)) return;
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
 
             QuickSell.Logger.LogDebug("Dropping held item");
@@ -653,7 +653,7 @@ public class SellCommand : Command
             if (sellData.value <= 0)
             {
                 QuickSell.Logger.LogDebug($"{sellData.value} <= 0 -> There is no need to sell anything, terminating");
-                ChatCommandAPI.ChatCommandAPI.Print($"You already have {sellData.existingMoney} existing money out of desired {sellData.originalValue}");
+                QuickSell.FancyChatDisplay($"You already have {sellData.existingMoney} existing money out of desired {sellData.originalValue}");
                 return;
             }
 
