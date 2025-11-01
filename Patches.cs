@@ -1,7 +1,21 @@
 ﻿using HarmonyLib;
+using System;
+using System.Linq;
 using Unity.Netcode;
+using UnityEngine;
 
 namespace QuickSell;
+
+public class HelperFuncs
+{
+    public static void TryClearDepositItemsDesk()
+    {
+        var desk = UnityEngine.Object.FindObjectOfType<DepositItemsDesk>();
+        if (desk == null) return;
+
+        desk.itemsOnCounter?.Clear();
+    }
+}
 
 public class Patches
 {
@@ -15,6 +29,7 @@ public class Patches
         static void OnLobbyCreated()
         {
             QuickSell.OnLobbyEntrance();
+            HelperFuncs.TryClearDepositItemsDesk();
             valueOnDesk = 0;
         }
 
@@ -23,6 +38,7 @@ public class Patches
         static void OnLobbyJoined()
         {
             QuickSell.OnLobbyEntrance();
+            HelperFuncs.TryClearDepositItemsDesk();
             valueOnDesk = 0;
         }
     }
@@ -66,5 +82,29 @@ public class Patches
         }
 
 
+    }
+
+    [HarmonyPatch(typeof(StartOfRound), "SyncShipUnlockablesClientRpc")]
+    public static class FixItemSaveDataMismatch
+    {
+        [HarmonyPrefix]
+        public static void SafeLoadData(int[] itemSaveData)
+        {
+            try
+            {
+                var objs = UnityEngine.Object.FindObjectsByType<GrabbableObject>(
+                    FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+                int expected = objs.Count(o => o.itemProperties.saveItemVariable);
+                if (itemSaveData.Length < expected)
+                {
+                    Debug.LogWarning($"ItemSaveData length mismatch: {itemSaveData.Length} < {expected}. Truncating.");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Patch] Error checking itemSaveData length: {e}");
+            }
+        }
     }
 }

@@ -13,11 +13,12 @@ using System.Threading.Tasks;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
+
 namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
-public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one
+public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one, fix non-final day output
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;
@@ -64,7 +65,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
         _ = new SellCommand();
         _ = new OvertimeCommand();
-        var harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
+        Harmony harmony = new(MyPluginInfo.PLUGIN_GUID);
 
         harmony.PatchAll();
 
@@ -574,6 +575,7 @@ public class SellCommand : Command
         QuickSell.Logger.LogDebug("variation == \"all\" -> calling SellAll()");
         sellData.value = -1;
 
+        sellData.quotaLeft = TimeOfDay.Instance.profitQuota - (TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk);
         SellForValue();
     }
 
@@ -1073,7 +1075,12 @@ public class SellCommand : Command
         }
 
         // Calculates overtime addition caused by this sell command
-        int calculatedOvertime = sellData.o || sellData.variation == "all" ? FindOvertime(items.Sum(obj => obj.scrapValue), sellData.quotaLeft, sellData.n) : 0;
+        int calculatedOvertime = (sellData.o || sellData.variation == "all") ? 
+            FindOvertime(
+                (int)(items.Sum(i => i.scrapValue) * StartOfRound.Instance.companyBuyingRate),
+                sellData.quotaLeft,
+                sellData.n)
+            : 0;
 
         // The printout of the selling results
         QuickSell.FancyChatDisplay(
@@ -1093,7 +1100,7 @@ public class SellCommand : Command
 
             $"{(
                 sellData.originalValue != ""
-                ? $":\n{items.Sum(obj => obj.scrapValue) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
+                ? $":\n{(int)(items.Sum(i => i.scrapValue) * StartOfRound.Instance.companyBuyingRate) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
                 : $", sold every {(sellData.a ? "" : "unfiltered ")}item"
             )}"
         );
@@ -1455,3 +1462,22 @@ public class OvertimeCommand : Command
         return true;
     }
 }
+
+#if DEBUG
+public class DebugCommand : Command
+{
+    public override string Name => "Debug";
+    public override string Description => "";
+    public override string[] Commands => [Name.ToLower(), "d"];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        QuickSell.Logger.LogDebug($"Terminating");
+        return true;
+    }
+}
+#endif
