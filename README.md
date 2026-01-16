@@ -28,9 +28,15 @@ Only YOU need this mod in order for it to work
 
 - If you wanna sell all items on ship use `/sell all`
 
+- If you wanna sell all items on ship including blacklisted items use `/sell all -a`
+
 - If you wanna sell one TYPE of item, hold this item in your hands and use `/sell item`
 
-- If you wanna see current overtime use `/ot`
+- If you wanna see current overtime, money in terminal and their sum use `/ot`
+
+- If you want to see how much money you need to leave in terminal to get to the desired `<amount>` after takeoff, use `/ot <amount>`
+
+- Instead of `<amount>` in any command you can use mathematical expressions and number suffixes (`k`, `m` etc.), for example `2k + 30*5`
 
 ### Blacklist
 
@@ -38,7 +44,7 @@ Only YOU need this mod in order for it to work
 
 - If you wanna add (remove) an item to temporary config (empties when you close the game) use `/sell bl +` (`/sell bl -`) while holding the item in your hands
 
-- If you wanna empty the temporary blacklist use `/sell bl empty`
+- If you wanna clear the temporary blacklist use `/sell bl clear`
 
 - If you wanna display a blacklist use `/sell bl [-a] [-p]`
 
@@ -48,7 +54,7 @@ Only YOU need this mod in order for it to work
 
 - If you wanna add (remove) an item to temporary config (empties when you close the game) use `/sell pr +` (`/sell pr -`) while holding the item in your hands
 
-- If you wanna empty the temporary blacklist use `/sell pr empty`
+- If you wanna clear the temporary blacklist use `/sell pr clear`
 
 - If you wanna display a blacklist use `/sell pr [-a] [-p]`
 
@@ -78,9 +84,9 @@ There is specific information on each command and its usage in the in-game docum
 
 - `/sell {bl | pr} {+ | -} [-p]` to add/remove an item to/from the temprory (or permanent with -p flag) blacklist/priority set
 
-- `/sell {bl | pr} empty` to empty the temporary blacklist/priority set
+- `/sell {bl | pr} clear` to clear the temporary blacklist/priority set
 
-- `/ot [-n]` to see overtime
+- `/ot [<amount>] [-n]` to see overtime, money in terminal, their sum and how much money you need to leave in terminal to get to the desired `<amount>`
 
 </details>
 
@@ -116,14 +122,14 @@ There is specific information on each command and its usage in the in-game docum
 
 The blacklist tells the mod which items not to sell. There are three (four) kinds of it: permanent, temporary(add), temporary(remove) and active.
 - Permanent blacklist loads itself from the config at the start of the game. Although it's possible, I wouldn't recommend to modify the config by yourself, instead modify the permanent blacklist through in-game commands explained later (to avoid any user-made errors).
-- Temporary blacklists (they only act together but there are two of them) are created when you launch Lethal Company and are destroyed when you close it. You can freely add/remove something from them and they will impact what you sell until you close the game or empty them.
+- Temporary blacklists (they only act together but there are two of them) are created when you launch Lethal Company and are destroyed when you close it. You can freely add/remove something from them and they will impact what you sell until you close the game or clear them.
 - Active blacklist is the combination of the two. It takes the permanent blacklist, adds to it temporary(add) and removes temporary(remove) from it. It's the one which is ACTUALLY used to decide which items not to sell.
 
 #### Priority
 
 The priority list tells the mod which items to prioritize when selling. It will still try to sell as close to the provided value as possible but if multiple combinations of items are possible choose the one which has the most priority items. As with a blacklist there are three (four) kinds of priority sets: permanent, temporary(add), temporary(remove) and active.
 - Permanent priority set loads itself from the config at the start of the game. Although it's possible, I wouldn't recommend to modify the config by yourself, instead modify the permanent priority set through in-game commands explained later (to avoid any user-made errors).
-- Temporary priority sets (they only act together but there are two of them) are created when you launch Lethal Company and are destroyed when you close it. You can freely add/remove something from them and they will impact what you sell until you close the game or empty them.
+- Temporary priority sets (they only act together but there are two of them) are created when you launch Lethal Company and are destroyed when you close it. You can freely add/remove something from them and they will impact what you sell until you close the game or clear them.
 - Active priority set is the combination of the two (three). It takes the permanent priority set, adds to it temporary(add) and removes temporary(remove) from it. It's the one which is ACTUALLY used to decide which items not to sell.
 
 </details>
@@ -176,11 +182,11 @@ Usage:
 
 `/sell bl {remove | rm | r | -} [itemName] [-p]`
 
-`/sell bl {empty | flash | flush}`
+`/sell bl {clear | empty | flash | flush}`
                 
 Without modifiers just prints an active blacklist, you can add -a to also display temporary blacklist or -p to display permanent blacklist instead.
 By using `/sell bl +` (`/sell bl -`) you can temporarily blacklist (or prohibit to blacklist) an item currently in your hands. You can also add/remove it from a permanent blacklist by using -p flag.
-By using `/sell bl empty` you can clear temporary blacklist in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
+By using `/sell bl clear` you can clear temporary blacklist in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
 
 #### Priority
 
@@ -192,11 +198,11 @@ Usage:
 
 `/sell pr {remove | rm | r | -} [itemName] [-p]`
 
-`/sell pr {empty | flash | flush}`
+`/sell pr {clear | empty | flash | flush}`
                 
 Without modifiers just prints an active priority set, you can add -a to also display temporary priority set or -p to display permanent priority set instead.
 By using "/sell pr +" ("/sell bl -") you can temporarily prioritize (or prohibit form being prioritized) an item currently in your hands. You can also add/remove it from a permanent priority set by using -p flag.
-By using "/sell pr empty" you can clear temporary priority set in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
+By using "/sell pr clear" you can clear temporary priority set in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
 
 #### Overtime
 
@@ -204,7 +210,9 @@ Usage:
 
 `/ot [-n]`
 
-Displays overtime caused by already fullfilled quota and items on desk
+`/ot <amount> [-n]`
+
+Displays overtime caused by already fullfilled quota and items on desk, money already in terminal + items on desk, sum of these two and, if `<amount>` was inputted, shows how much money you need to leave in terminal to get to `<amount>` after takeoff
 
 </details>
 

@@ -65,6 +65,11 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
         _ = new SellCommand();
         _ = new OvertimeCommand();
+
+        #if DEBUG
+        _ = new DebugCommand();
+        #endif
+
         Harmony harmony = new(MyPluginInfo.PLUGIN_GUID);
 
         harmony.PatchAll();
@@ -110,6 +115,55 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         PriorityItemsSet = CommaSplit(priorityItemsConfig.Value);
         RebuildActivePrioritySet();
         QuickSell.Logger.LogDebug($"New priority set: {string.Join(",", PriorityItemsSet)}");
+    }
+
+    public static void ParseFlags(ref string[] args, out string flags)
+    {
+        flags = string.Join("", args.Where(i => i != "" && i.First() == '-' && i.Length > 1).Select(i => i[1..]));
+        args = [.. args.Where(i => i != "" && !(i.First() == '-' && i.Length > 1))];
+    }
+
+    public static bool ComputeExpression(string[] args, ref int value)
+    {
+        // Add every argument to the expression
+        string expressionRaw = string.Join(' ', args).Trim();
+
+        string expression = "";
+        foreach (char i in expressionRaw)
+        {
+            if (i == 'k') expression += "000";
+            else if (i == 'm') expression += "000000";
+            else if (i == 'b') expression += "000000000";
+            else if (i == 't') expression += "000000000000";
+            else expression += i;
+        }
+        QuickSell.Logger.LogDebug($"Expression: \"{expression}\" ");
+
+        // Attempts to compute an expression
+        QuickSell.Logger.LogDebug($"Evaluating expression");
+        string evaluatedExpression = "";
+        try
+        {
+            evaluatedExpression = new DataTable().Compute(expression, "").ToString();
+        }
+        catch
+        {
+            QuickSell.Logger.LogDebug("Failed to evalute expression");
+            ChatCommandAPI.ChatCommandAPI.PrintError("Failed to evalute expression");
+            return false;
+        }
+
+        // Two checks for value being right
+        if (!int.TryParse(evaluatedExpression, out value))
+        {
+            QuickSell.Logger.LogDebug("The value is not convertable into integer");
+            ChatCommandAPI.ChatCommandAPI.PrintError("The value is not convertable into integer");
+            return false;
+        }
+
+        QuickSell.Logger.LogDebug($"Expression evaluated: {expression} => {evaluatedExpression}");
+
+        return true;
     }
 
     public void RebuildActivePrioritySet() =>
@@ -235,8 +289,8 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug("Calling ParseArguments()");
 
-        // Parsing flags
-        string flags = string.Join("", sellData.args.Where(i => i != "" && i.First() == '-' && i.Length > 1).Select(i => i[1..]));
+        // Parsing flags and removing them from arguments
+        QuickSell.ParseFlags(ref sellData.args, out string flags);
 
         // Turn all the flags into variables for readability
         sellData.e = flags.Contains("e") || flags.Contains("t");  // Remove -t after a few updates
@@ -246,8 +300,6 @@ public class SellCommand : Command
         sellData.p = flags.Contains("p");
         if (flags.Contains("t")) ChatCommandAPI.ChatCommandAPI.PrintError("Flag -t as a check for existing money will be depricated soon. Use -e instead");
         QuickSell.Logger.LogDebug($"Flags: -e == {sellData.e}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}; -p == {sellData.p}");
-
-        sellData.args = [.. sellData.args.Where(i => i != "" && !(i.First() == '-' && i.Length > 1))];
 
         if (sellData.args.Length == 0) return;
 
@@ -273,7 +325,7 @@ public class SellCommand : Command
 
         if (!OpenDoor(out int itemCount, out int totalValue)) return;
 
-        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}");
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}", "SELL RESULTS");
     }
 
     protected static void SellHelp()
@@ -294,10 +346,11 @@ public class SellCommand : Command
                 "item" to sell all items like the one you are holding or the one you specified
                 "quota" to sell exactly for quota
                 "all" to sell all unfiltered scrap available
-                <amount> (input a number instead of \"amount\") to sell exactly how much you need
+                <amount> (input a number instead of <amount>) to sell exactly how much you need
 
                 Use "/sell help pages" to see info on all pages
                 Use "/sell help flags" to see info on important flags
+                Use "/sell help overtime" to see info on the "/ot" (overtime command)
                 Use "/sell help <variation>" to see info on specific command
                 """
             },
@@ -308,7 +361,7 @@ public class SellCommand : Command
                 /sell help [page]
 
                 Pages:
-                default, pages, flags, item, quota, all, amount, -o, -e, -a, -n
+                default, pages, flags, item, quota, all, amount, blacklist, priority, overtime, -o, -e, -a, -p, -n
                 """
             },
             {
@@ -362,7 +415,7 @@ public class SellCommand : Command
                 Usage:
                 /sell <amount> [-o] [-e] [-a] [-n]
 
-                Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that
+                Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that. Instead of <amount> in any command you can use mathematical expressions and number suffixes ("k", "m" etc.), for example "2k + 30*5"
                 """
             },
             {
@@ -372,11 +425,11 @@ public class SellCommand : Command
                 /sell bl [-a] [-p]
                 /sell bl {add | ad | a | +} [itemName] [-p]
                 /sell bl {remove | rm | r | -} [itemName] [-p]
-                /sell bl {empty | flash | flush}
+                /sell bl {clear | empty | flash | flush}
                 
                 Without modifiers just prints an active blacklist, you can add -a to also display temporary blacklist or -p to display permanent blacklist instead.
                 By using "/sell bl +" ("/sell bl -") you can temporarily blacklist (or prohibit to blacklist) an item currently in your hands. You can also add/remove it from a permanent blacklist by using -p flag.
-                By using "/sell bl empty" you can clear temporary blacklist in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
+                By using "/sell bl clear" you can clear temporary blacklist in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
                 """
             },
             {
@@ -391,6 +444,16 @@ public class SellCommand : Command
                 Without modifiers just prints an active priority set, you can add -a to also display temporary priority set or -p to display permanent priority set instead.
                 By using "/sell pr +" ("/sell bl -") you can temporarily prioritize (or prohibit form being prioritized) an item currently in your hands. You can also add/remove it from a permanent priority set by using -p flag.
                 By using "/sell pr empty" you can clear temporary priority set in case you don't need it anymore (keep in mind that it automatically resets when you close the game window)
+                """
+            },
+            {
+                "overtime",
+                """
+                Usage:
+                /ot [-n]
+                /ot <amount> [-n]
+
+                Displays overtime caused by already fullfilled quota and items on desk, money already in terminal + items on desk, sum of these two and, if <amount> was inputted, shows how much money you need to leave in terminal to get to <amount> after takeoff
                 """
             },
             {
@@ -499,6 +562,10 @@ public class SellCommand : Command
             case "priority":
                 QuickSell.FancyChatDisplay(pages["priority"], "PRIORITY HELP PAGE");
                 return;
+            case "overtime":
+            case "ot":
+                QuickSell.FancyChatDisplay(pages["overtime"], "OVERTIME HELP PAGE");
+                return;
         }
 
         ChatCommandAPI.ChatCommandAPI.PrintError("No page with this name exists");
@@ -547,7 +614,7 @@ public class SellCommand : Command
             sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         }
 
-        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}");
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}", "SELL RESULTS");
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
     }
@@ -562,7 +629,7 @@ public class SellCommand : Command
 
         if (sellData.value < 1)
         {
-            QuickSell.FancyChatDisplay($"Quota is already fulfilled");
+            QuickSell.FancyChatDisplay($"Quota is already fulfilled", "SELL RESULTS");
             QuickSell.Logger.LogDebug("Quota is already fulfilled -> nothing left to do");
             return;
         }
@@ -583,38 +650,14 @@ public class SellCommand : Command
     {
         QuickSell.Logger.LogDebug($"variation == \"<amount>\" -> calling SellForRequestedAmount()");
 
-        // Add every argument except the flags to the expression
-        string expression = string.Join(' ', sellData.args.Where(i => i.First() != '-' || i.Length <= 1)).Trim();
-        QuickSell.Logger.LogDebug($"Expression: \"{expression}\" ");
+        if (!QuickSell.ComputeExpression(sellData.args, ref sellData.value)) return;
 
-        // Attempts to compute an expression
-        QuickSell.Logger.LogDebug($"Evaluating expression");
-        string evaluatedExpression = "";
-        try
-        {
-            evaluatedExpression = new DataTable().Compute(expression, "").ToString();
-        }
-        catch
-        {
-            QuickSell.Logger.LogDebug("Failed to evalute expression");
-            ChatCommandAPI.ChatCommandAPI.PrintError("Failed to evalute expression");
-            return;
-        }
-
-        // Two checks for value being right
-        if (!int.TryParse(evaluatedExpression, out sellData.value) || sellData.value < 0)
-        {
-            QuickSell.Logger.LogDebug("The value is not convertable into integer");
-            ChatCommandAPI.ChatCommandAPI.PrintError("The value is not convertable into integer");
-            return;
-        }
-        if (sellData.value < 0)
+        if (sellData.value <= 0)
         {
             QuickSell.Logger.LogDebug("The value must be positive");
             ChatCommandAPI.ChatCommandAPI.PrintError("The value must be positive");
             return;
         }
-        QuickSell.Logger.LogDebug($"Expression evaluated: {expression} => {evaluatedExpression}");
 
         // Assigning the result of the expression as the requested value
         sellData.originalValue = sellData.value.ToString();
@@ -847,7 +890,7 @@ public class SellCommand : Command
         bool add;
         if (new string[] { "add", "ad", "a", "+" }.Contains(sellData.args[1])) add = true;
         else if (new string[] { "remove", "rm", "r", "-" }.Contains(sellData.args[1])) add = false;
-        else if (new string[] { "empty", "flash", "flush" }.Contains(sellData.args[1]))
+        else if (new string[] { "clear", "empty", "flash", "flush" }.Contains(sellData.args[1]))
         {
             if (sellData.p)
             {
@@ -1102,7 +1145,8 @@ public class SellCommand : Command
                 sellData.originalValue != ""
                 ? $":\n{(int)(items.Sum(i => i.scrapValue) * StartOfRound.Instance.companyBuyingRate) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
                 : $", sold every {(sellData.a ? "" : "unfiltered ")}item"
-            )}"
+            )}",
+            "SELL RESULTS"
         );
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
@@ -1449,14 +1493,44 @@ public class OvertimeCommand : Command
     public override string Description => "Shows how much overtime you will get\n" +
         "-n to force non-restart calculations (if you don't know what it is don't use it)";
     public override string[] Commands => [Name.ToLower(), "ot"];
-    public override string[] Syntax => ["", "[-n]"];
+    public override string[] Syntax => ["", "[<amount>] [-n]"];
 
     public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
     {
         QuickSell.Logger.LogDebug($"The overtime command was initiated");
-        error = "it should not happen";
-        int realDeadline = SellCommand.GetDeadline(args.Length > 0 && args[0] == "-n");
-        QuickSell.FancyChatDisplay($"Overtime: {Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0)}", "OVERTIME");
+
+        error = "Cannot find terminal?!";
+        var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
+        if (terminal == null)
+        {
+            ChatCommandAPI.ChatCommandAPI.PrintError("Cannot find terminal!");
+            QuickSell.Logger.LogDebug($"Cannot find terminal!");
+            return false;
+        }
+
+        // Parsing flags and removing them from arguments
+        QuickSell.ParseFlags(ref args, out string flags);
+
+        int realDeadline = SellCommand.GetDeadline(flags.Contains("n"));
+        int realOvertime = Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0);
+        int existingMoney = Traverse.Create(terminal).Field("groupCredits").GetValue<int>() + Patches.valueOnDesk;
+        int allMoney = existingMoney + realOvertime;
+
+        int requestedSum = 0;
+        if (args.Length > 0) QuickSell.ComputeExpression(args, ref requestedSum);
+        int moneyForSum = requestedSum - realOvertime <= 0 ? 0 : requestedSum - realOvertime;
+
+        QuickSell.FancyChatDisplay(
+            $"""
+            Overtime: {realOvertime}
+            Money in terminal{(Patches.valueOnDesk <= 0 ? "" : " + on the desk")}: {existingMoney}
+            Money after takeoff: {allMoney}
+            {(requestedSum == 0 ? "" :
+                $"Money required to get to {requestedSum} after takeoff: {moneyForSum}"
+            )}{(moneyForSum <= existingMoney ? "" :
+                $" (unreachable right now)"
+            )}
+            """, "OVERTIME");
 
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
@@ -1467,14 +1541,16 @@ public class OvertimeCommand : Command
 public class DebugCommand : Command
 {
     public override string Name => "Debug";
-    public override string Description => "";
-    public override string[] Commands => [Name.ToLower(), "d"];
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
 
     public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
     {
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
+
+        QuickSell.FancyChatDisplay($"Value in ship: {StartOfRound.Instance.GetValueOfAllScrap(true, false) - StartOfRound.Instance.GetBodiesInShip() * 5}", "DEBUG");
 
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
