@@ -37,6 +37,10 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
     internal HashSet<string> ActivePrioritySet = [];
     internal bool UpdatePriority = true;
 
+    internal ConfigEntry<string> flagPrefixConfig = null!;
+    internal char flagPrefixSanitized = '-';
+    internal bool isFlagPrefixCorrect = true;
+
     public static List<(string prefabName, string name, string itemName, string scanNodeName)> allItems = [];
 
     private void Awake()
@@ -46,15 +50,21 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
         itemBlacklistConfig = Config.Bind(
             "Items",
-            "ItemBlacklist",
+            "Item Blacklist",
             CommaJoin(["ShotgunItem", "KnifeItem", "ZeddogPlushie", "GiftBox"]),
             "Items to never sell by internal name (comma-separated)"
         );
         priorityItemsConfig = Config.Bind(
             "Items",
-            "PriorityItems",
+            "Priority Items",
             CommaJoin(["Clock", "EasterEgg", "SoccerBall", "WhoopieCushion"]),
             "Items which are prioritized when selling"
+        );
+        flagPrefixConfig = Config.Bind(
+            "Misc",
+            "Flag Prefix",
+            "-",
+            "The symbol which is used as prefix in flags (aka \"-\" in \"-e\")"
         );
 
         RebuildBlacklistSet();
@@ -62,6 +72,9 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
         RebuildPrioritySet();
         priorityItemsConfig.SettingChanged += (_, _) => RebuildPrioritySet();
+
+        SanitizeFlagPrefix();
+        flagPrefixConfig.SettingChanged += (_, _) => SanitizeFlagPrefix();
 
         _ = new SellCommand();
         _ = new OvertimeCommand();
@@ -117,10 +130,28 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         QuickSell.Logger.LogDebug($"New priority set: {string.Join(",", PriorityItemsSet)}");
     }
 
-    public static void ParseFlags(ref string[] args, out string flags)
+    public void RebuildActivePrioritySet() =>
+        ActivePrioritySet = [.. PriorityItemsSet.Union(TempPriorityAddSet).Except(TempPriorityRmSet)];
+
+    public void SanitizeFlagPrefix()
     {
-        flags = string.Join("", args.Where(i => i != "" && i.First() == '-' && i.Length > 1).Select(i => i[1..]));
-        args = [.. args.Where(i => i != "" && !(i.First() == '-' && i.Length > 1))];
+        QuickSell.Logger.LogDebug($"Sanitizing flag prefix");
+        QuickSell.Logger.LogDebug($"Flag prefix from config: {flagPrefixConfig.Value}");
+        if (!char.TryParse(flagPrefixConfig.Value, out flagPrefixSanitized))
+        {
+            QuickSell.Logger.LogDebug($"Flag prefix from config is not convertable into char!");
+            QuickSell.Logger.LogDebug($"Setting it to defauld (\"-\")");
+            isFlagPrefixCorrect = false;
+            flagPrefixSanitized = '-';
+            return;
+        }
+        QuickSell.Logger.LogDebug($"Config flag prefix sanitized, active flag prefix: \"{flagPrefixSanitized}\"");
+    }
+
+    public static void ParseFlags(ref string[] args, out string flags, char flagPrefix = '-')
+    {
+        flags = string.Join("", args.Where(i => i != "" && i.First() == flagPrefix && i.Length > 1).Select(i => i[1..]));
+        args = [.. args.Where(i => i != "" && !(i.First() == flagPrefix && i.Length > 1))];
     }
 
     public static bool ComputeExpression(string[] args, ref int value)
@@ -165,9 +196,6 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
         return true;
     }
-
-    public void RebuildActivePrioritySet() =>
-        ActivePrioritySet = [.. PriorityItemsSet.Union(TempPriorityAddSet).Except(TempPriorityRmSet)];
 
     internal static string CommaJoin(HashSet<string> i) => i.Join(delimiter: ",");
 
@@ -277,7 +305,7 @@ public class SellCommand : Command
         sellData = new() { args = args };
 
         // Parse the variation and the flags from the arguments
-        ParseArguments();
+        ParseArguments(QuickSell.Instance.flagPrefixSanitized);
 
         // Executes chosen variation. Note that after this the sellData.desk variable is assigned if needed
         if (actions.TryGetValue(sellData.variation, out var action)) action();
@@ -285,12 +313,12 @@ public class SellCommand : Command
         return true;
     }
 
-    protected static void ParseArguments()  // Remove -t flag after a few updates
+    protected static void ParseArguments(char flagPrefix = '-')  // Remove -t flag after a few updates
     {
         QuickSell.Logger.LogDebug("Calling ParseArguments()");
 
         // Parsing flags and removing them from arguments
-        QuickSell.ParseFlags(ref sellData.args, out string flags);
+        QuickSell.ParseFlags(ref sellData.args, out string flags, flagPrefix);
 
         // Turn all the flags into variables for readability
         sellData.e = flags.Contains("e") || flags.Contains("t");  // Remove -t after a few updates
@@ -1509,7 +1537,7 @@ public class OvertimeCommand : Command
         }
 
         // Parsing flags and removing them from arguments
-        QuickSell.ParseFlags(ref args, out string flags);
+        QuickSell.ParseFlags(ref args, out string flags, QuickSell.Instance.flagPrefixSanitized);
 
         int realDeadline = SellCommand.GetDeadline(flags.Contains("n"));
         int realOvertime = Math.Max((TimeOfDay.Instance.quotaFulfilled + Patches.valueOnDesk + Math.Min(75 * realDeadline - TimeOfDay.Instance.profitQuota, 0)) / 5, 0);
