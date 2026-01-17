@@ -145,11 +145,14 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
             flagPrefixSanitized = '-';
             return;
         }
+        isFlagPrefixCorrect = true;
         QuickSell.Logger.LogDebug($"Config flag prefix sanitized, active flag prefix: \"{flagPrefixSanitized}\"");
     }
 
     public static void ParseFlags(ref string[] args, out string flags, char flagPrefix = '-')
     {
+        if (!QuickSell.Instance.isFlagPrefixCorrect) ChatCommandAPI.ChatCommandAPI.PrintError("User-inputted flag prefix was not convertable into a single symbol, it's probably not a single symbol or an invalid one. For now \"-\" flag prefix will be assumed");
+
         flags = string.Join("", args.Where(i => i != "" && i.First() == flagPrefix && i.Length > 1).Select(i => i[1..]));
         args = [.. args.Where(i => i != "" && !(i.First() == flagPrefix && i.Length > 1))];
     }
@@ -401,6 +404,8 @@ public class SellCommand : Command
                 Combining flags:
                 Split: /sell <variation> -e -o -a
                 Together: /sell <variation> -eoa
+
+                You can change flag prefix in config to use a different symbol at the start of all flags (for example +e instead of -e)
 
                 "-o" to sell accounting for overtime (used with <amount>)
                 "-e" for accounting for existing money in terminal and overtime (used with <amount>)

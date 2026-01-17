@@ -98,6 +98,8 @@ There is specific information on each command and its usage in the in-game docum
 
 #### Again there are help pages dedicated to each flag and to flags in general
 
+You can change flag prefix in config to use a different symbol at the start of all flags (for example +e instead of -e)
+
 - `-o` `(overtime)` to sell accounting for overtime (used with <amount> and often goes together with -e)
 
 - `-e` `(existing)` for accounting for existing money in terminal and overtime (used with <amount> and almost always goes together with -o)
@@ -220,6 +222,8 @@ Displays overtime caused by already fullfilled quota and items on desk, money al
 
 <details>
   <summary>Click to collapse/expand</summary>
+
+You can change flag prefix in config to use a different symbol at the start of all flags (for example +e instead of -e)
 
 ### -o
 
