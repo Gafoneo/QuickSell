@@ -778,7 +778,7 @@ public class SellCommand : Command
         bool add;
         if (new string[] { "add", "ad", "a", "+" }.Contains(sellData.args[1])) add = true;
         else if (new string[] { "remove", "rm", "r", "-" }.Contains(sellData.args[1])) add = false;
-        else if (new string[] { "empty", "flash", "flush"}.Contains(sellData.args[1]))
+        else if (new string[] { "clear", "empty", "flash", "flush"}.Contains(sellData.args[1]))
         {
             if (sellData.p)
             {
@@ -1482,6 +1482,7 @@ public class SellCommand : Command
                     scrapValue: > 0,
                     isHeld: false,
                     isPocketed: false,
+                    grabbable: true,
                     itemProperties.isScrap: true
                 }
                 && !sellData.desk.itemsOnCounter.Contains(i)
@@ -1497,7 +1498,8 @@ public class SellCommand : Command
             .Where(i => i is
                 {
                     isHeld: false,
-                    isPocketed: false
+                    isPocketed: false,
+                    grabbable: true
                 }
                 && !sellData.desk.itemsOnCounter.Contains(i)
             )
@@ -1583,9 +1585,43 @@ public class DebugCommand : Command
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
 
-        QuickSell.FancyChatDisplay($"Value in ship: {StartOfRound.Instance.GetValueOfAllScrap(true, false) - StartOfRound.Instance.GetBodiesInShip() * 5}", "DEBUG");
+        var items = UnityEngine.Object.FindObjectsOfType<GrabbableObject>();
 
-        QuickSell.Logger.LogDebug($"Terminating");
+//        foreach (var item in items)
+//        {
+//            var scanNode = item.GetComponentInChildren<ScanNodeProperties>();
+//
+//            if (scanNode != null)
+//            {
+//                string scanName = scanNode.headerText;
+//                ChatCommandAPI.ChatCommandAPI.Print(scanName);
+//            }
+//        }
+
+        if (args.Length > 0)
+        {
+            foreach (var item in items)
+            {
+                string name = item.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "";
+                if (name == args[0])
+                {
+                    ChatCommandAPI.ChatCommandAPI.Print(item.grabbable ? "true" : "false");
+                }
+            }
+        }
+        else
+        {
+            foreach (var item in items)
+            {
+                string name = item.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "";
+                if (item.grabbable && item.itemProperties.isScrap && item.scrapValue > 0)
+                {
+                    ChatCommandAPI.ChatCommandAPI.Print($"{name} worth {item.scrapValue} is grabbable!");
+                }
+            }
+        }
+
+            QuickSell.Logger.LogDebug($"Terminating");
         return true;
     }
 }
