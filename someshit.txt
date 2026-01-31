@@ -1,1 +1,12 @@
 Add sell <amount> of particular item
+Add sell packs, abbreviations for items/moons (art, wee, sho, etc.)
+Automatically open gifts
+Soft dependency toomanyitems
+Fix inaccuracy with low quotaRate
+Make a changelog popup (DisplayMenuNotification)
+Config for disabling commands
+Add HQoL-like storage of items
+Add confirmation dialog for sell for amount (include expression there, resulting value, and if integer is different from double)
+Mod for player ratings
+Config for inverting flags
+Add a flag to not include sales into calculations

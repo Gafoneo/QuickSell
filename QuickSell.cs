@@ -9,8 +9,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEngine;
+using static Unity.Audio.Handle;
 using Object = UnityEngine.Object;
 
 
@@ -40,6 +42,12 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
     internal ConfigEntry<string> flagPrefixConfig = null!;
     internal char flagPrefixSanitized = '-';
     internal bool isFlagPrefixCorrect = true;
+
+#if DEBUG
+    internal bool openingGifts = false;
+    internal bool grabRPC1 = false;
+    internal bool grabRPC2 = false;
+#endif
 
     public static List<(string prefabName, string name, string itemName, string scanNodeName)> allItems = [];
 
@@ -80,8 +88,12 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         _ = new OvertimeCommand();
 
         #if DEBUG
-        _ = new DebugCommand();
-        #endif
+        _ = new DebugCommandA();
+        _ = new DebugCommandB();
+        _ = new DebugCommandC();
+        _ = new DebugCommandD();
+        _ = new DebugCommandE();
+#endif
 
         Harmony harmony = new(MyPluginInfo.PLUGIN_GUID);
 
@@ -157,25 +169,191 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         args = [.. args.Where(i => i != "" && !(i.First() == flagPrefix && i.Length > 1))];
     }
 
+    public static string? PreparingExpression(string expressionRaw)
+    {
+        QuickSell.Logger.LogDebug($"Preparing expression: {expressionRaw}");
+
+        // A big regex line which splits an expression into parts
+        Regex tokenRegex = new(@"
+            ( 
+                [a-zA-Z]+         # Words
+                | \d+(\.\d+)?     # Numbers with a integer part (1.5)
+                | \.\d+           # Numbers with no integer part (.5)
+                | [+\-*/()]       # Operators
+            )
+        ", RegexOptions.IgnorePatternWhitespace);
+        string[] dividedExpression = [.. tokenRegex.Matches(expressionRaw).Cast<Match>().Select(m => m.Value)];
+        QuickSell.Logger.LogDebug($"Divided expression: {dividedExpression.Join(delimiter: ", ")}");
+
+        string expression = "";
+        string? part = "";
+        QuickSell.Logger.LogDebug($"Iterating over each part of the expression");
+        for (int i = 0; i < dividedExpression.Length; i++)
+        {
+            part = PartProcessing(ref dividedExpression, i);
+            if (part == null)
+            {
+                ChatCommandAPI.ChatCommandAPI.PrintError($"Part \"{dividedExpression[i]}\" was unable to be processed, terminating");
+                return null;
+            }
+            QuickSell.Logger.LogDebug($"Resulting part: {part}");
+            expression += part;
+
+            string? next = null;
+            for (int j = i + 1; j < dividedExpression.Length; j++)
+            {
+                if (!string.IsNullOrEmpty(dividedExpression[j]))
+                    next = dividedExpression[j];
+            }
+            if (next == null)
+            {
+                QuickSell.Logger.LogDebug($"This part is the last one, no operator afterwards needed");
+            }
+            else if (new Regex(@"^[+\-*/()]$").IsMatch(next))
+            {
+                QuickSell.Logger.LogDebug($"The part afterwards is an operator, continuing to the next part");
+            }
+            else
+            {
+                QuickSell.Logger.LogDebug($"The next part is not an operator, adding \"+\"");
+                expression += "+";
+            }
+        }
+        QuickSell.Logger.LogDebug($"\n");
+        return expression;
+    }
+
+    internal static string? PartProcessing(ref string[] dividedExpression, int i)
+    {
+        if (dividedExpression[i].IsNullOrEmpty()) return "";
+
+        // Checks if this string is a number/operator
+        if (new Regex(@"^(\d+(\.\d+)?|\.\d+|[+\-*/()])$").IsMatch(dividedExpression[i]))
+        {
+            QuickSell.Logger.LogDebug($"\n{dividedExpression[i]} is a number/operator, adding to final expression");
+            return dividedExpression[i];
+        }
+        else if (new Regex(@"^[a-zA-Z]+$").IsMatch(dividedExpression[i]))
+        {
+            string? numString = GetNumStringFromName(ref dividedExpression, i);
+            if (numString != null)
+            {
+                return numString;
+            }
+            else
+            {
+                QuickSell.Logger.LogDebug($"Checking for number suffixes");
+                foreach (char j in dividedExpression[i])
+                {
+                    numString = "";
+                    if (j == 'k') numString += "*1000";
+                    else if (j == 'm') numString += "*1000000";
+                    else if (j == 'b') numString += "*1000000000";
+                    else if (j == 't') numString += "*1000000000000";
+                    else return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    public static string? GetNumStringFromName(ref string[] dividedExpression, int i)
+    {
+        QuickSell.Logger.LogDebug($"\n");
+        QuickSell.Logger.LogDebug($"Trying to transform a name \"{dividedExpression[i]}\" into a value");
+        Terminal terminal = Object.FindFirstObjectByType<Terminal>();
+        TerminalKeyword noun = (TerminalKeyword)AccessTools.Method(terminal.GetType(), "ParseWord").Invoke(terminal, [dividedExpression[i], 2]);
+
+        if (noun == null)
+        {
+            QuickSell.Logger.LogDebug($"Noun is null");
+            return null;
+        }
+        QuickSell.Logger.LogDebug($"Parsed word: {noun.name}");
+
+        TerminalKeyword verb = noun.defaultVerb;
+        TerminalNode? node = null;
+
+        foreach (CompatibleNoun cn in verb.compatibleNouns)
+        {
+            if (cn.noun == noun)
+            {
+                node = cn.result;
+                break;
+            }
+        }
+
+        if (node == null)
+        {
+            QuickSell.Logger.LogDebug($"The node was null, terminating.");
+            return null;
+        }
+
+        QuickSell.Logger.LogDebug($"Trying to get amount and assigning additional operators");
+        if (dividedExpression.Length > i + 1 && float.TryParse(dividedExpression[i + 1], out float playerDefinedAmount))
+        {
+            QuickSell.Logger.LogDebug($"Next string part is a number ({dividedExpression[i + 1]}), using it as amount");
+            dividedExpression[i + 1] = "";
+        }
+        else
+        {
+            if (dividedExpression.Length > i + 1) QuickSell.Logger.LogDebug($"Next string part is not a number ({dividedExpression[i + 1]}), using 1 as amount");
+            else QuickSell.Logger.LogDebug($"It's the last string part, using 1 as amount");
+
+            playerDefinedAmount = 1;
+        }
+
+        int totalCostOfItems;
+        string? stringPart = null;
+
+        if (node.buyItemIndex != -1)
+        {
+            if (node.buyItemIndex != -7)
+            {
+                totalCostOfItems = (int)((float)terminal.buyableItemsList[node.buyItemIndex].creditsWorth * ((float)terminal.itemSalesPercentages[node.buyItemIndex] / 100f) * playerDefinedAmount);
+                stringPart = totalCostOfItems.ToString();
+                QuickSell.Logger.LogDebug($"Resulting cost: {stringPart}");
+            }
+            else
+            {
+                totalCostOfItems = node.itemCost;
+                stringPart = (totalCostOfItems * playerDefinedAmount).ToString();
+                QuickSell.Logger.LogDebug($"Resulting cost: {stringPart}");
+            }
+        }
+        else if (node.buyVehicleIndex != -1)
+        {
+            int num = terminal.buyableItemsList.Length + node.buyVehicleIndex;
+            totalCostOfItems = (int)((float)node.itemCost * ((float)terminal.itemSalesPercentages[num] / 100f));
+            stringPart = (totalCostOfItems * playerDefinedAmount).ToString();
+            QuickSell.Logger.LogDebug($"Resulting cost: {stringPart}");
+        }
+        else if (node.buyRerouteToMoon != -1 || node.shipUnlockableID != -1)
+        {
+            totalCostOfItems = node.itemCost;
+            stringPart = (totalCostOfItems * playerDefinedAmount).ToString();
+            QuickSell.Logger.LogDebug($"Resulting cost: {stringPart}");
+        }
+
+        return stringPart;
+    }
+
     public static bool ComputeExpression(string[] args, ref int value)
     {
         // Add every argument to the expression
-        string expressionRaw = string.Join(' ', args).Trim();
+        string expressionRaw = string.Join(' ', args);
 
-        string expression = "";
-        foreach (char i in expressionRaw)
+        string? expression = PreparingExpression(expressionRaw);
+        if (expression == null)
         {
-            if (i == 'k') expression += "000";
-            else if (i == 'm') expression += "000000";
-            else if (i == 'b') expression += "000000000";
-            else if (i == 't') expression += "000000000000";
-            else expression += i;
+            return false;
         }
+
         QuickSell.Logger.LogDebug($"Expression: \"{expression}\" ");
 
         // Attempts to compute an expression
         QuickSell.Logger.LogDebug($"Evaluating expression");
-        string evaluatedExpression = "";
+        string evaluatedExpression;
         try
         {
             evaluatedExpression = new DataTable().Compute(expression, "").ToString();
@@ -187,15 +365,19 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
             return false;
         }
 
+        QuickSell.Logger.LogDebug($"Expression evaluated: {expression} => {evaluatedExpression}");
+
         // Two checks for value being right
-        if (!int.TryParse(evaluatedExpression, out value))
+        if (!double.TryParse(evaluatedExpression, out double preValue))
         {
-            QuickSell.Logger.LogDebug("The value is not convertable into integer");
-            ChatCommandAPI.ChatCommandAPI.PrintError("The value is not convertable into integer");
+            QuickSell.Logger.LogDebug($"The value {evaluatedExpression} is not convertable into double");
+            ChatCommandAPI.ChatCommandAPI.PrintError($"The value {evaluatedExpression} is not convertable into double");
             return false;
         }
 
-        QuickSell.Logger.LogDebug($"Expression evaluated: {expression} => {evaluatedExpression}");
+        value = (int)preValue;
+
+        QuickSell.Logger.LogDebug($"Final value: {value}");
 
         return true;
     }
@@ -1086,7 +1268,7 @@ public class SellCommand : Command
     /// </summary>
     /// <param name="itemName">The name of a held item</param>
     /// <returns>true if an item is being held and false otherwise</returns>
-    protected static bool CheckHeldItem(out string itemName)
+    internal static bool CheckHeldItem(out string itemName)
     {
         itemName = "";
 
@@ -1468,7 +1650,7 @@ public class SellCommand : Command
     
     protected static bool IsPriority(GrabbableObject item) => QuickSell.Instance.ActivePrioritySet.Contains(RemoveClone(item.name), StringComparer.OrdinalIgnoreCase);
 
-    protected static string RemoveClone(string name, string cloneString = "(Clone)") => name.EndsWith(cloneString) ? name[..^cloneString.Length] : name;
+    internal static string RemoveClone(string name, string cloneString = "(Clone)") => name.EndsWith(cloneString) ? name[..^cloneString.Length] : name;
 
     protected static GrabbableObject[] FilterItems(GrabbableObject[] items, bool ignoreBlacklist)
     {
@@ -1552,7 +1734,7 @@ public class OvertimeCommand : Command
         int allMoney = existingMoney + realOvertime;
 
         int requestedSum = 0;
-        if (args.Length > 0) QuickSell.ComputeExpression(args, ref requestedSum);
+        if (args.Length > 0 && QuickSell.ComputeExpression(args, ref requestedSum)) { }
         int moneyForSum = requestedSum - realOvertime <= 0 ? 0 : requestedSum - realOvertime;
 
         QuickSell.FancyChatDisplay(
@@ -1573,9 +1755,9 @@ public class OvertimeCommand : Command
 }
 
 #if DEBUG
-public class DebugCommand : Command
+public class DebugCommandA : Command  // All items on the map
 {
-    public override string Name => "Debug";
+    public override string Name => "DebugA";
     public override string Description => "Some debug command";
     public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
@@ -1586,17 +1768,6 @@ public class DebugCommand : Command
         error = "it should not happen";
 
         var items = UnityEngine.Object.FindObjectsOfType<GrabbableObject>();
-
-//        foreach (var item in items)
-//        {
-//            var scanNode = item.GetComponentInChildren<ScanNodeProperties>();
-//
-//            if (scanNode != null)
-//            {
-//                string scanName = scanNode.headerText;
-//                ChatCommandAPI.ChatCommandAPI.Print(scanName);
-//            }
-//        }
 
         if (args.Length > 0)
         {
@@ -1622,6 +1793,224 @@ public class DebugCommand : Command
         }
 
             QuickSell.Logger.LogDebug($"Terminating");
+        return true;
+    }
+}
+
+public class DebugCommandB : Command  // 2 FPS
+{
+    public override string Name => "DebugB";
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = 2;
+
+        HUDManager.Instance.DisplayTip("DebugFPSChanger", $"Changed FPS cap to {1}");
+
+        QuickSell.Logger.LogDebug($"Terminating");
+        return true;
+    }
+}
+
+// WIP
+public class DebugCommandC : Command  // Gift boxes
+{
+    public override string Name => "DebugC";
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        SellCommand.CheckHeldItem(out string heldItem);
+        if (heldItem == "GiftBox")
+        {
+            StartOfRound.Instance.localPlayerController.DiscardHeldObject();
+        }
+
+        var items = UnityEngine.Object.FindObjectsOfType<GiftBoxItem>();
+
+        StartOfRound.Instance.StartCoroutine(OpenGiftBoxes(items));
+
+        QuickSell.Logger.LogDebug($"Terminating");
+        return true;
+    }
+
+    // WIP
+    // DON'T FORGET ABOUT GIFTS IN INVENTORIES OF OTHER PLAYERS AND YOURS
+    public IEnumerator OpenGiftBoxes(GiftBoxItem[] items)
+    {
+        QuickSell.Instance.openingGifts = true;
+
+        var player = StartOfRound.Instance.localPlayerController;
+
+        foreach (var item in items)
+        {
+            if (item.hasUsedGift)
+            {
+                continue;
+            }
+            // idk why this 'if' is there but it's in the Zeekers code, so it's better not to touch it
+            if (!player.isTestingPlayer)
+            {
+                player.GrabObjectServerRpc(item.NetworkObject);
+            }
+            if (item.itemProperties.syncGrabFunction)
+            {
+                item.isSendingItemRPC++;
+                item.GrabServerRpc();
+            }
+
+            while (!(QuickSell.Instance.grabRPC1 && QuickSell.Instance.grabRPC2))
+            {
+                yield return null;
+            }
+            QuickSell.Instance.grabRPC1 = false;
+            QuickSell.Instance.grabRPC2 = false;
+
+            // player.grabObjectCoroutine = player.StartCoroutine(player.GrabObject());
+
+            item.playerHeldBy = StartOfRound.Instance.localPlayerController;
+            item.ItemActivate(item.isBeingUsed);
+
+            // item.hasUsedGift = true;
+            // item.OpenGiftBoxServerRpc();
+
+            // yield return new WaitForSeconds(0.1f);
+        }
+
+        QuickSell.Instance.openingGifts = false;
+    }
+}
+
+public class DebugCommandD : Command  // terminal nodes
+{
+    public override string Name => "DebugD";
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        TerminalNode[] nodes = Resources.FindObjectsOfTypeAll<TerminalNode>();
+
+        Debug.Log($"Found {nodes.Length} TerminalNodes:");
+
+        foreach (var node in nodes)
+        {
+            string name = node.name;
+            int cost = node.itemCost;
+            Debug.Log($"Node: {name}, Cost: {cost}");
+        }
+
+        if (args.Length > 0 )
+        {
+            Terminal terminal = Object.FindFirstObjectByType<Terminal>();
+            TerminalKeyword tknoun = (TerminalKeyword)AccessTools.Method(terminal.GetType(), "ParseWord").Invoke(terminal, [args[0], 2]);
+            TerminalKeyword tkverb = tknoun.defaultVerb;
+
+            foreach (CompatibleNoun cn in tkverb.compatibleNouns)
+            {
+                if (cn.noun == tknoun)
+                {
+                    var node = cn.result;
+                    if (node == null)
+                    {
+                        Debug.Log($"The node was null, terminating.");
+                        return true;
+                    }
+
+                    int playerDefinedAmount;
+                    string value = Regex.Match(args[0], "\\d+").Value;
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        playerDefinedAmount = int.Parse(value);
+                    }
+                    else
+                    {
+                        playerDefinedAmount = 1;
+                    }
+
+                    int totalCostOfItems = 0;
+                    if (node.buyItemIndex != -1)
+                    {
+                        if (node.buyItemIndex != -7)
+                        {
+                            totalCostOfItems = (int)((float)terminal.buyableItemsList[node.buyItemIndex].creditsWorth * ((float)terminal.itemSalesPercentages[node.buyItemIndex] / 100f) * (float)playerDefinedAmount);
+                        }
+                        else
+                        {
+                            totalCostOfItems = node.itemCost * playerDefinedAmount;
+                        }
+                    }
+                    else if (node.buyVehicleIndex != -1)
+                    {
+                        int num = terminal.buyableItemsList.Length + node.buyVehicleIndex;
+                        totalCostOfItems = (int)((float)node.itemCost * ((float)terminal.itemSalesPercentages[num] / 100f));
+                    }
+                    else if (node.buyRerouteToMoon != -1 || node.shipUnlockableID != -1)
+                    {
+                        totalCostOfItems = node.itemCost;
+                    }
+
+                    // int totalCostOfItems = (int)((float)terminal.buyableItemsList[node.buyItemIndex].creditsWorth * ((float)terminal.itemSalesPercentages[node.buyItemIndex] / 100f) * (float)playerDefinedAmount);
+
+                    ChatCommandAPI.ChatCommandAPI.Print($"Noun keyword: {tknoun.word} ; verb keyword: {tkverb.word}");
+                    ChatCommandAPI.ChatCommandAPI.Print($"Result: {node?.name ?? ""}");
+                    ChatCommandAPI.ChatCommandAPI.Print($"Amount: {playerDefinedAmount}");
+                    ChatCommandAPI.ChatCommandAPI.Print($"Default cost: {(node?.itemCost ?? -727) * playerDefinedAmount}");
+                    ChatCommandAPI.ChatCommandAPI.Print($"Actual cost: {totalCostOfItems}");
+                }
+            }
+        }
+
+        QuickSell.Logger.LogDebug($"Terminating");
+        return true;
+    }
+}
+
+public class DebugCommandE : Command  // Regex
+{
+    public override string Name => "DebugE";
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        // A big regex line which splits an expression into parts
+        Regex tokenRegex = new(@"
+            ( 
+                [a-zA-Z]+         # Words
+                | \d+(\.\d+)?     # Numbers with a integer part (1.5)
+                | \.\d+           # Numbers with no integer part (.5)
+                | [+\-*/()]       # Operators
+            )
+        ", RegexOptions.IgnorePatternWhitespace);
+        string[] dividedExpression = [.. tokenRegex.Matches(args.Join(delimiter: " ")).Cast<Match>().Select(m => m.Value)];
+
+        foreach (string i in dividedExpression)
+        {
+            Debug.Log(i);
+        }
+
+        QuickSell.Logger.LogDebug($"Terminating");
         return true;
     }
 }

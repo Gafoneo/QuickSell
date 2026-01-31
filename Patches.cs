@@ -83,7 +83,8 @@ public class Patches
 
 
     }
-
+    
+    // I don't remember what it's really for but if I wrote it, maybe it's needed for something; maybe I'll delete it in the future
     [HarmonyPatch(typeof(StartOfRound), "SyncShipUnlockablesClientRpc")]
     public static class FixItemSaveDataMismatch
     {
@@ -107,4 +108,27 @@ public class Patches
             }
         }
     }
+
+    // WIP for opening gifts
+    // [HarmonyPatch(typeof(GameNetcodeStuff.PlayerControllerB))]
+    // public static class StopClientRPCWhenNeeded
+    // {
+    //     [HarmonyPrefix]
+    //     static bool GrabObjectClientRpc(bool grabValidated, NetworkObjectReference grabbedObject)
+    //     {
+    //         if (!QuickSell.Instance.openingGifts) return true;
+    // 
+    //         QuickSell.Instance.grabRPC1 = true;
+    //         return false;
+    //     }
+    // 
+    //     [HarmonyPrefix]
+    //     static bool GrabServerRpc()
+    //     {
+    //         if (!QuickSell.Instance.openingGifts) return true;
+    // 
+    //         QuickSell.Instance.grabRPC2 = true;
+    //         return false;
+    //     }
+    // }
 }

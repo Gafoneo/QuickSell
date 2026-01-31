@@ -54,9 +54,9 @@ Only YOU need this mod in order for it to work
 
 - If you wanna add (remove) an item to temporary config (empties when you close the game) use `/sell pr +` (`/sell pr -`) while holding the item in your hands
 
-- If you wanna clear the temporary blacklist use `/sell pr clear`
+- If you wanna clear the temporary priority use `/sell pr clear`
 
-- If you wanna display a blacklist use `/sell pr [-a] [-p]`
+- If you wanna display a priority use `/sell pr [-a] [-p]`
 
 </details>
 
