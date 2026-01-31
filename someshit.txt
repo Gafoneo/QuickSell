@@ -1,8 +1,7 @@
 Add sell <amount> of particular item
-Add sell packs, abbreviations for items/moons (art, wee, sho, etc.)
+Add sell packs maybe
 Automatically open gifts
-Soft dependency toomanyitems
-Fix inaccuracy with low quotaRate
+Fix inaccuracy with low quotaRate??
 Make a changelog popup (DisplayMenuNotification)
 Config for disabling commands
 Add HQoL-like storage of items

@@ -1,8 +1,11 @@
 ﻿using HarmonyLib;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Unity.Netcode;
 using UnityEngine;
+using System.Reflection;
+using System.Reflection.Emit;
 
 namespace QuickSell;
 
@@ -108,6 +111,53 @@ public class Patches
             }
         }
     }
+
+    [HarmonyPatch(typeof(MenuManager), "Start")]
+    public static class NoWrongVersionPopup
+    {
+        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var code = new List<CodeInstruction>(instructions);
+
+            var displayNotif = typeof(MenuManager).GetMethod(
+                "DisplayMenuNotification",
+                BindingFlags.Instance | BindingFlags.Public
+            );
+
+            int callIndex = -1;
+            for (int i = 0; i < code.Count; i++)
+            {
+                if (!(code[i].operand is string str && str.Contains("Some of your save files may not be compatible with version"))) continue;
+
+                for (int j = i; j < code.Count; j++)
+                {
+                    if (code[j].Calls(displayNotif))
+                    {
+                        callIndex = j;
+                        break;
+                    }
+                }
+                break;
+            }
+
+            if (callIndex == -1) return code;
+
+            for (int i = callIndex; i >= 0; i--)
+            {
+                if (code[i].operand is string str && str.Contains("Some of your save files may not be compatible with version"))
+                {
+                    code[i].opcode = OpCodes.Nop;
+                    if (i >= 1 && code[i - 1].opcode == OpCodes.Ldarg_0) code[i - 1].opcode = OpCodes.Nop;
+                    break;
+                }
+                code[i].opcode = OpCodes.Nop;
+            }
+
+            return code;
+        }
+    }
+
+
 
     // WIP for opening gifts
     // [HarmonyPatch(typeof(GameNetcodeStuff.PlayerControllerB))]

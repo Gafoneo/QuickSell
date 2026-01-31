@@ -21,7 +21,7 @@ namespace QuickSell;
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
 [BepInDependency("mattymatty.TooManyItems", DependencyFlags.SoftDependency)]
-public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one, fix non-final day output
+public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one, fix non-final day output (idk what's wrong with it rn)
 {
     public static QuickSell Instance { get; private set; } = null!;
     internal static new ManualLogSource Logger { get; private set; } = null!;
@@ -88,12 +88,10 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         _ = new SellCommand();
         _ = new OvertimeCommand();
 
-        #if DEBUG
+#if DEBUG
         _ = new DebugCommandA();
         _ = new DebugCommandB();
         _ = new DebugCommandC();
-        _ = new DebugCommandD();
-        _ = new DebugCommandE();
 #endif
 
         Harmony harmony = new(MyPluginInfo.PLUGIN_GUID);
@@ -1891,128 +1889,6 @@ public class DebugCommandC : Command  // Gift boxes
         }
 
         QuickSell.Instance.openingGifts = false;
-    }
-}
-
-public class DebugCommandD : Command  // terminal nodes
-{
-    public override string Name => "DebugD";
-    public override string Description => "Some debug command";
-    public override string[] Commands => [Name.ToLower()];
-    public override string[] Syntax => [""];
-
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
-    {
-        QuickSell.Logger.LogDebug($"The debug command was initiated");
-        error = "it should not happen";
-
-        TerminalNode[] nodes = Resources.FindObjectsOfTypeAll<TerminalNode>();
-
-        Debug.Log($"Found {nodes.Length} TerminalNodes:");
-
-        foreach (var node in nodes)
-        {
-            string name = node.name;
-            int cost = node.itemCost;
-            Debug.Log($"Node: {name}, Cost: {cost}");
-        }
-
-        if (args.Length > 0 )
-        {
-            Terminal terminal = Object.FindFirstObjectByType<Terminal>();
-            TerminalKeyword tknoun = (TerminalKeyword)AccessTools.Method(terminal.GetType(), "ParseWord").Invoke(terminal, [args[0], 2]);
-            TerminalKeyword tkverb = tknoun.defaultVerb;
-
-            foreach (CompatibleNoun cn in tkverb.compatibleNouns)
-            {
-                if (cn.noun == tknoun)
-                {
-                    var node = cn.result;
-                    if (node == null)
-                    {
-                        Debug.Log($"The node was null, terminating.");
-                        return true;
-                    }
-
-                    int playerDefinedAmount;
-                    string value = Regex.Match(args[0], "\\d+").Value;
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        playerDefinedAmount = int.Parse(value);
-                    }
-                    else
-                    {
-                        playerDefinedAmount = 1;
-                    }
-
-                    int totalCostOfItems = 0;
-                    if (node.buyItemIndex != -1)
-                    {
-                        if (node.buyItemIndex != -7)
-                        {
-                            totalCostOfItems = (int)((float)terminal.buyableItemsList[node.buyItemIndex].creditsWorth * ((float)terminal.itemSalesPercentages[node.buyItemIndex] / 100f) * (float)playerDefinedAmount);
-                        }
-                        else
-                        {
-                            totalCostOfItems = node.itemCost * playerDefinedAmount;
-                        }
-                    }
-                    else if (node.buyVehicleIndex != -1)
-                    {
-                        int num = terminal.buyableItemsList.Length + node.buyVehicleIndex;
-                        totalCostOfItems = (int)((float)node.itemCost * ((float)terminal.itemSalesPercentages[num] / 100f));
-                    }
-                    else if (node.buyRerouteToMoon != -1 || node.shipUnlockableID != -1)
-                    {
-                        totalCostOfItems = node.itemCost;
-                    }
-
-                    // int totalCostOfItems = (int)((float)terminal.buyableItemsList[node.buyItemIndex].creditsWorth * ((float)terminal.itemSalesPercentages[node.buyItemIndex] / 100f) * (float)playerDefinedAmount);
-
-                    ChatCommandAPI.ChatCommandAPI.Print($"Noun keyword: {tknoun.word} ; verb keyword: {tkverb.word}");
-                    ChatCommandAPI.ChatCommandAPI.Print($"Result: {node?.name ?? ""}");
-                    ChatCommandAPI.ChatCommandAPI.Print($"Amount: {playerDefinedAmount}");
-                    ChatCommandAPI.ChatCommandAPI.Print($"Default cost: {(node?.itemCost ?? -727) * playerDefinedAmount}");
-                    ChatCommandAPI.ChatCommandAPI.Print($"Actual cost: {totalCostOfItems}");
-                }
-            }
-        }
-
-        QuickSell.Logger.LogDebug($"Terminating");
-        return true;
-    }
-}
-
-public class DebugCommandE : Command  // Regex
-{
-    public override string Name => "DebugE";
-    public override string Description => "Some debug command";
-    public override string[] Commands => [Name.ToLower()];
-    public override string[] Syntax => [""];
-
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
-    {
-        QuickSell.Logger.LogDebug($"The debug command was initiated");
-        error = "it should not happen";
-
-        // A big regex line which splits an expression into parts
-        Regex tokenRegex = new(@"
-            ( 
-                [a-zA-Z]+         # Words
-                | \d+(\.\d+)?     # Numbers with a integer part (1.5)
-                | \.\d+           # Numbers with no integer part (.5)
-                | [+\-*/()]       # Operators
-            )
-        ", RegexOptions.IgnorePatternWhitespace);
-        string[] dividedExpression = [.. tokenRegex.Matches(args.Join(delimiter: " ")).Cast<Match>().Select(m => m.Value)];
-
-        foreach (string i in dividedExpression)
-        {
-            Debug.Log(i);
-        }
-
-        QuickSell.Logger.LogDebug($"Terminating");
-        return true;
     }
 }
 #endif
