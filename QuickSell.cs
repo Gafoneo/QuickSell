@@ -12,7 +12,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEngine;
-using static Unity.Audio.Handle;
+using static BepInEx.BepInDependency;
 using Object = UnityEngine.Object;
 
 
@@ -20,6 +20,7 @@ namespace QuickSell;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 [BepInDependency("baer1.ChatCommandAPI")]
+[BepInDependency("mattymatty.TooManyItems", DependencyFlags.SoftDependency)]
 public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blacklist and priority into the permanent one, fix non-final day output
 {
     public static QuickSell Instance { get; private set; } = null!;
