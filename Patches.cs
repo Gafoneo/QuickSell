@@ -112,7 +112,7 @@ public class Patches
         }
     }
 
-    [HarmonyPatch(typeof(MenuManager), "Start")]
+    // [HarmonyPatch(typeof(MenuManager), "Start")]
     public static class NoWrongVersionPopup
     {
         static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
@@ -154,6 +154,49 @@ public class Patches
             }
 
             return code;
+        }
+    }
+
+    // [HarmonyPatch(typeof(MenuManager), "Start")]
+    public static class Changelog
+    {
+        static void Postfix(MenuManager __instance)
+        {
+            Debug.Log("Trying to create notification");
+            __instance.DisplayMenuNotification("Some placeholder info", "[ OK ]");
+            var canvas = UnityEngine.Object
+                .FindObjectsOfType<Canvas>(true)
+                .FirstOrDefault(c => c.name.Contains("Canvas"));
+
+            if (canvas == null)
+            {
+                Debug.Log("Canvas is null, shutting down");
+                return;
+            }
+
+            RectTransform[] transforms = canvas.GetComponentsInChildren<RectTransform>();
+
+            RectTransform? panel = transforms.Where(i => i.name == "Panel" && i.transform.parent?.name == "MenuNotification").FirstOrDefault();
+            RectTransform? image = transforms.Where(i => i.name == "Image" && i.transform.parent?.name == "Panel").FirstOrDefault();
+
+
+            if (panel == null)
+            {
+                Debug.Log("Panel is null");
+                return;
+            }
+
+            panel.sizeDelta = new Vector2(
+                panel.sizeDelta.x * 2f,
+                panel.sizeDelta.y * 2.5f
+            );
+
+            image.sizeDelta = new Vector2(
+                image.sizeDelta.x * 2f,
+                image.sizeDelta.y * 2.5f
+            );
+
+            Debug.Log("Panel resized successfully");
         }
     }
 

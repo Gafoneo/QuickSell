@@ -36,7 +36,7 @@ Only YOU need this mod in order for it to work
 
 - If you want to see how much money you need to leave in terminal to get to the desired `<amount>` after takeoff, use `/ot <amount>`
 
-- Instead of `<amount>` in any command you can use mathematical expressions and number suffixes (`k`, `m` etc.), for example `2k + 30*5`
+- Instead of `<amount>` in any command you can use mathematical expressions (/sell 1500+25\*2), number suffixes (/sell 2k), item/moon names with quantities which will include sales calculations (/sell art + wee2) and you can also omit pluses (/sell art wee2 sho4 jet), but be careful because if you omit pluses you can't use something like `/sell jet 1k`, it won't sell for `900+1000`, it'll try to sell `900*1000`.
 
 ### Blacklist
 
@@ -172,7 +172,7 @@ Usage:
 
 `/sell <amount> [-o] [-e] [-a] [-n]`
 
-Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that
+Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that. Instead of `<amount>` you can use mathematical expressions (/sell 1500+25\*2), number suffixes (/sell 2k), item/moon names with quantities which will include sales calculations (/sell art + wee2) and you can also omit pluses (/sell art wee2 sho4 jet), but be careful because if you omit pluses you can't use something like `/sell jet 1k`, it won't sell for `900+1000`, it'll try to sell `900*1000`.
 
 #### Blacklist
 
@@ -214,7 +214,7 @@ Usage:
 
 `/ot <amount> [-n]`
 
-Displays overtime caused by already fullfilled quota and items on desk, money already in terminal + items on desk, sum of these two and, if `<amount>` was inputted, shows how much money you need to leave in terminal to get to `<amount>` after takeoff
+Displays overtime caused by already fullfilled quota and items on desk, money already in terminal + items on desk, sum of these two and, if `<amount>` was inputted, shows how much money you need to leave in terminal to get to `<amount>` after takeoff. Instead of `<amount>` you can use mathematical expressions (/sell 1500+25\*2), number suffixes (/sell 2k), item/moon names with quantities which will include sales calculations (/sell art + wee2) and you can also omit pluses (/sell art wee2 sho4 jet), but be careful because if you omit pluses you can't use something like `/sell jet 1k`, it won't sell for `900+1000`, it'll try to sell `900*1000`.
 
 </details>
 

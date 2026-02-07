@@ -629,7 +629,7 @@ public class SellCommand : Command
                 Usage:
                 /sell <amount> [-o] [-e] [-a] [-n]
 
-                Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that. Instead of <amount> in any command you can use mathematical expressions and number suffixes ("k", "m" etc.), for example "2k + 30*5"
+                Tries to sell exactly how much you specified. If there is not enough scrap, sells nothing. If an exact value isn't achievable sells the smallest value after that. Instead of <amount> in any command you can use mathematical expressions (/sell 1500+25*2), number suffixes (/sell 2k), item/moon names with quantities which will include sales calculations (/sell art + wee2) and you can also omit pluses (/sell art wee2 sho4 jet), but be careful because if you omit pluses you can't use something like "/sell jet 1k", it won't sell for 900+1000, it'll try to sell 900*1000.
                 """
             },
             {
