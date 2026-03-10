@@ -92,6 +92,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         _ = new DebugCommandA();
         _ = new DebugCommandB();
         _ = new DebugCommandC();
+        _ = new DebugCommandD();
 #endif
 
         Harmony harmony = new(MyPluginInfo.PLUGIN_GUID);
@@ -804,8 +805,8 @@ public class SellCommand : Command
             QuickSell.Logger.LogDebug($"Item to sell: {itemName}");
         }
 
-        var items = Object.FindObjectsOfType<GrabbableObject>();
-        if (items == null || items.Length == 0)
+        List<GrabbableObject> items = Patches.scrapOnShip;
+        if (items == null || items.Count == 0)
         {
             QuickSell.Logger.LogDebug("No items were found");
             ChatCommandAPI.ChatCommandAPI.PrintError("No items were found");
@@ -813,7 +814,7 @@ public class SellCommand : Command
         }
 
         items = FindItems(items, itemName);
-        if (items == null || items.Length == 0)
+        if (items == null || items.Count == 0)
         {
             QuickSell.Logger.LogDebug($"No items called \"{itemName}\" were detected");
             ChatCommandAPI.ChatCommandAPI.PrintError($"No items called \"{itemName}\" were detected");
@@ -1376,8 +1377,8 @@ public class SellCommand : Command
             return null;
         }
 
-        var items = Object.FindObjectsOfType<GrabbableObject>();
-        if (items == null || items.Length == 0)
+        List<GrabbableObject> items = Patches.scrapOnShip;
+        if (items == null || items.Count == 0)
         {
             QuickSell.Logger.LogDebug("No items were found -> returning null");
             return null;
@@ -1385,7 +1386,7 @@ public class SellCommand : Command
         QuickSell.Logger.LogDebug($"Cost of all scrap: {items.Sum(i => i.scrapValue)}, {NumberOfItems(items.Count())}");
 
         items = FilterItems(items, ignoreBlacklist);
-        if (items.Length == 0)
+        if (items.Count == 0)
         {
             QuickSell.Logger.LogDebug("No items were left after filtering -> returning null");
             return null;
@@ -1395,7 +1396,7 @@ public class SellCommand : Command
         if (value == -1)
         {
             QuickSell.Logger.LogDebug("value == -1 -> need to sell everything -> returning [.. items]");
-            return items.Length != 0 ? [.. items] : null;
+            return items.Count != 0 ? [.. items] : null;
         }
 
         value = (int)Math.Ceiling((double)(value / StartOfRound.Instance.companyBuyingRate));
@@ -1422,7 +1423,7 @@ public class SellCommand : Command
         return bestSubset;
     }
 
-    protected static List<GrabbableObject> CombinationFinder(GrabbableObject[] items, int value)
+    protected static List<GrabbableObject> CombinationFinder(List<GrabbableObject> items, int value)
     {
         QuickSell.Logger.LogDebug($"Calling CombinationFinder({NumberOfItems(items.Count())}, {value})");
 
@@ -1651,7 +1652,7 @@ public class SellCommand : Command
 
     internal static string RemoveClone(string name, string cloneString = "(Clone)") => name.EndsWith(cloneString) ? name[..^cloneString.Length] : name;
 
-    protected static GrabbableObject[] FilterItems(GrabbableObject[] items, bool ignoreBlacklist)
+    protected static List<GrabbableObject> FilterItems(List<GrabbableObject> items, bool ignoreBlacklist)
     {
         QuickSell.Logger.LogDebug($"Calling FilterItems({NumberOfItems(items.Count())})");
         if (ignoreBlacklist) QuickSell.Logger.LogDebug($"Ignoring blacklist");
@@ -1671,7 +1672,7 @@ public class SellCommand : Command
             .Where(i => !QuickSell.Instance.ActiveBlacklistSet.Contains(RemoveClone(i.name), StringComparer.OrdinalIgnoreCase) || ignoreBlacklist)];
     }
 
-    protected static GrabbableObject[] FindItems(GrabbableObject[] items, string itemName)
+    protected static List<GrabbableObject> FindItems(List<GrabbableObject> items, string itemName)
     {
         QuickSell.Logger.LogDebug($"Calling FindItems({NumberOfItems(items.Count())}, {itemName})");
 
@@ -1889,6 +1890,30 @@ public class DebugCommandC : Command  // Gift boxes
         }
 
         QuickSell.Instance.openingGifts = false;
+    }
+}
+
+public class DebugCommandD : Command  // Show listed scrap
+{
+    public override string Name => "DebugD";
+    public override string Description => "Some debug command";
+    public override string[] Commands => [Name.ToLower()];
+    public override string[] Syntax => [""];
+
+    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    {
+        QuickSell.Logger.LogDebug($"The debug command was initiated");
+        error = "it should not happen";
+
+        foreach (var item in Patches.scrapOnShip)
+        {
+            if (item == null) continue;
+            ChatCommandAPI.ChatCommandAPI.Print($"{item?.name} {item?.scrapValue}");
+            ChatCommandAPI.ChatCommandAPI.Print($"Overall: {Patches.scrapOnShip.Count} items");
+        }
+
+        QuickSell.Logger.LogDebug($"Terminating");
+        return true;
     }
 }
 #endif

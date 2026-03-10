@@ -2,10 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Unity.Netcode;
-using UnityEngine;
 using System.Reflection;
 using System.Reflection.Emit;
+using Unity.Netcode;
+using UnityEngine;
 
 namespace QuickSell;
 
@@ -18,17 +18,121 @@ public class HelperFuncs
 
         desk.itemsOnCounter?.Clear();
     }
+
+    public static void AddPresent(GrabbableObject component)
+    {
+        Patches.scrapOnShip.Add(component);
+        ChatCommandAPI.ChatCommandAPI.Print($"Added {component.name} worth {component.scrapValue}");
+        ChatCommandAPI.ChatCommandAPI.Print($"==========================");
+        foreach (var item in Patches.scrapOnShip)
+        {
+            ChatCommandAPI.ChatCommandAPI.Print($"{item.name} {item.scrapValue}");
+        }
+
+    }
 }
 
 public class Patches
 {
     public static int valueOnDesk;
+    public static List<GrabbableObject> scrapOnShip = [];
+
+    [HarmonyPatch(typeof(RoundManager), nameof(RoundManager.GenerateNewLevelClientRpc))]
+    public class ScrapListingClient
+    {
+        [HarmonyPrefix]
+        static void ListingAllScrapClient()
+        {
+            Debug.Log("Listing all scrap on level load");
+            ChatCommandAPI.ChatCommandAPI.Print($"Listing all scrap on level load");
+            scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
+            ChatCommandAPI.ChatCommandAPI.Print($"There is {scrapOnShip.Count} scrap on ship");
+            Debug.Log($"There is {scrapOnShip.Count} scrap on ship");
+        }
+    }
+
+    [HarmonyPatch(typeof(StartOfRound), nameof(StartOfRound.StartGame))]
+    public class ScrapListingServer
+    {
+        [HarmonyPrefix]
+        static void ListingAllScrapServer()
+        {
+            Debug.Log("Listing all scrap on level load");
+            ChatCommandAPI.ChatCommandAPI.Print($"Listing all scrap on level load");
+            scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
+            ChatCommandAPI.ChatCommandAPI.Print($"There is {scrapOnShip.Count} scrap on ship");
+            Debug.Log($"There is {scrapOnShip.Count} scrap on ship");
+        }
+    }
+
+    [HarmonyPatch]
+    public class ListingGiftsClient
+    {
+        static MethodBase TargetMethod()
+        {
+            var type = AccessTools.TypeByName("GiftBoxItem+<waitForGiftPresentToSpawnOnClient>d__19");
+            return AccessTools.Method(type, "MoveNext");
+        }
+        
+        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var instructionsList = new List<CodeInstruction>(instructions);
+
+            var target = AccessTools.Method(
+                typeof(GameNetcodeStuff.PlayerControllerB),
+                "SetItemInElevator"
+            );
+
+            for (int i = 0; i < instructionsList.Count; i++)
+            {
+                yield return instructionsList[i];
+
+                if (instructionsList[i].Calls(target))
+                {
+                    yield return new CodeInstruction(OpCodes.Ldloc_2);
+
+                    yield return new CodeInstruction(
+                        OpCodes.Call,
+                        AccessTools.Method(typeof(HelperFuncs), nameof(HelperFuncs.AddPresent))
+                    );
+                }
+            }
+        }
+    }
+
+
+    [HarmonyPatch(typeof(GiftBoxItem), nameof(GiftBoxItem.OpenGiftBoxServerRpc))]
+    public class ListingGiftsServer
+    {
+        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var target = AccessTools.Method(typeof(GiftBoxItem), "OpenGiftBoxClientRpc");
+
+            foreach (var instruction in instructions)
+            {
+                // Insert before OpenGiftBoxClientRpc call
+                if (instruction.Calls(target))
+                {
+                    // load component (local variable 4)
+                    yield return new CodeInstruction(OpCodes.Ldloc_S, (byte)4);
+
+                    // call our function
+                    yield return new CodeInstruction(
+                        OpCodes.Call,
+                        AccessTools.Method(typeof(HelperFuncs), nameof(HelperFuncs.AddPresent))
+                    );
+                }
+
+                yield return instruction;
+            }
+        }
+    }
 
     [HarmonyPatch(typeof(GameNetworkManager))]
     public class LobbyPatches
     {
-        [HarmonyPatch("StartHost")]
         [HarmonyPostfix]
+        [HarmonyPatch("StartHost")]
         static void OnLobbyCreated()
         {
             QuickSell.OnLobbyEntrance();
@@ -36,8 +140,8 @@ public class Patches
             valueOnDesk = 0;
         }
 
-        [HarmonyPatch("StartClient")]
         [HarmonyPostfix]
+        [HarmonyPatch("StartClient")]
         static void OnLobbyJoined()
         {
             QuickSell.OnLobbyEntrance();
