@@ -19,16 +19,17 @@ public class HelperFuncs
         desk.itemsOnCounter?.Clear();
     }
 
+    public static void ListingAllScrap()
+    {
+        Debug.Log("Listing all scrap on level load");
+        Patches.scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
+        Debug.Log($"There is {Patches.scrapOnShip.Count} scrap on ship");
+    }
+
     public static void AddPresent(GrabbableObject component)
     {
         Patches.scrapOnShip.Add(component);
-        ChatCommandAPI.ChatCommandAPI.Print($"Added {component.name} worth {component.scrapValue}");
-        ChatCommandAPI.ChatCommandAPI.Print($"==========================");
-        foreach (var item in Patches.scrapOnShip)
-        {
-            ChatCommandAPI.ChatCommandAPI.Print($"{item.name} {item.scrapValue}");
-        }
-
+        Debug.Log($"Added {component.name} worth {component.scrapValue}");
     }
 }
 
@@ -43,11 +44,7 @@ public class Patches
         [HarmonyPrefix]
         static void ListingAllScrapClient()
         {
-            Debug.Log("Listing all scrap on level load");
-            ChatCommandAPI.ChatCommandAPI.Print($"Listing all scrap on level load");
-            scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
-            ChatCommandAPI.ChatCommandAPI.Print($"There is {scrapOnShip.Count} scrap on ship");
-            Debug.Log($"There is {scrapOnShip.Count} scrap on ship");
+            HelperFuncs.ListingAllScrap();
         }
     }
 
@@ -57,11 +54,7 @@ public class Patches
         [HarmonyPrefix]
         static void ListingAllScrapServer()
         {
-            Debug.Log("Listing all scrap on level load");
-            ChatCommandAPI.ChatCommandAPI.Print($"Listing all scrap on level load");
-            scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
-            ChatCommandAPI.ChatCommandAPI.Print($"There is {scrapOnShip.Count} scrap on ship");
-            Debug.Log($"There is {scrapOnShip.Count} scrap on ship");
+            HelperFuncs.ListingAllScrap();
         }
     }
 
@@ -110,13 +103,9 @@ public class Patches
 
             foreach (var instruction in instructions)
             {
-                // Insert before OpenGiftBoxClientRpc call
                 if (instruction.Calls(target))
                 {
-                    // load component (local variable 4)
                     yield return new CodeInstruction(OpCodes.Ldloc_S, (byte)4);
-
-                    // call our function
                     yield return new CodeInstruction(
                         OpCodes.Call,
                         AccessTools.Method(typeof(HelperFuncs), nameof(HelperFuncs.AddPresent))
