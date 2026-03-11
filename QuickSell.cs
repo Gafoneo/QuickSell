@@ -179,24 +179,30 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
                 ChatCommandAPI.ChatCommandAPI.PrintError($"Part \"{dividedExpression[i]}\" was unable to be processed, terminating");
                 return null;
             }
+            if (part.IsNullOrEmpty()) continue;
+
             QuickSell.Logger.LogDebug($"Resulting part: {part}");
             expression += part;
 
             string? next = null;
+
             for (int j = i + 1; j < dividedExpression.Length; j++)
             {
                 if (!string.IsNullOrEmpty(dividedExpression[j]))
+                {
                     next = dividedExpression[j];
+                    break;
+                }
             }
             if (next == null)
             {
                 QuickSell.Logger.LogDebug($"This part is the last one, no operator afterwards needed");
             }
-            else if (new Regex(@"^[+\-*/()]$").IsMatch(next))
+            else if (new Regex(@"^[+\-*/()]$").IsMatch(next) || new Regex(@"^[+\-*/()]$").IsMatch(part) || new Regex(@"^[kmbt]*$").IsMatch(next))
             {
-                QuickSell.Logger.LogDebug($"The part afterwards is an operator, continuing to the next part");
+                QuickSell.Logger.LogDebug($"The part afterwards is an operator or a number suffix or this part is an operator, continuing to the next part");
             }
-            else if (!Regex.IsMatch(next, @"[kmbt]"))
+            else
             {
                 QuickSell.Logger.LogDebug($"The next part is not an operator, adding \"+\"");
                 expression += "+";
