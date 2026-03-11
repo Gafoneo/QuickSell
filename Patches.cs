@@ -11,6 +11,21 @@ namespace QuickSell;
 
 public class HelperFuncs
 {
+    public static void OnLobbyEntrance()
+    {
+        QuickSell.Logger.LogDebug("Calling OnLobbyEntrance()");
+        QuickSell.Logger.LogDebug("Creating allItems list");
+
+        // Add all possible items to List<item name, prefab name, scan node name>
+        QuickSell.allItems =
+        [..
+            Resources.FindObjectsOfTypeAll<Item>()
+            .Where(i => i.spawnPrefab && "box" != i.itemName)
+            .Select(i => (i.spawnPrefab.name, i.name, i.itemName, i.spawnPrefab.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? ""))
+        ];
+
+        QuickSell.Logger.LogDebug($"allItems list created. Length: {QuickSell.allItems.Count}");
+    }
     public static void TryClearDepositItemsDesk()
     {
         var desk = UnityEngine.Object.FindObjectOfType<DepositItemsDesk>();
@@ -124,7 +139,7 @@ public class Patches
         [HarmonyPatch("StartHost")]
         static void OnLobbyCreated()
         {
-            QuickSell.OnLobbyEntrance();
+            HelperFuncs.OnLobbyEntrance();
             HelperFuncs.TryClearDepositItemsDesk();
             valueOnDesk = 0;
         }
@@ -133,7 +148,7 @@ public class Patches
         [HarmonyPatch("StartClient")]
         static void OnLobbyJoined()
         {
-            QuickSell.OnLobbyEntrance();
+            HelperFuncs.OnLobbyEntrance();
             HelperFuncs.TryClearDepositItemsDesk();
             valueOnDesk = 0;
         }

@@ -102,23 +102,6 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         Logger.LogInfo($"{MyPluginInfo.PLUGIN_GUID} v{MyPluginInfo.PLUGIN_VERSION} was loaded!");
     }
 
-
-    public static void OnLobbyEntrance()
-    {
-        Logger.LogDebug("Calling OnLobbyEntrance()");
-        Logger.LogDebug("Creating allItems list");
-
-        // Add all possible items to List<item name, prefab name, scan node name>
-        allItems =
-        [..
-            Resources.FindObjectsOfTypeAll<Item>()
-            .Where(i => i.spawnPrefab && "box" != i.itemName)
-            .Select(i => (i.spawnPrefab.name, i.name, i.itemName, i.spawnPrefab.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? ""))
-        ];
-
-        Logger.LogDebug($"allItems list created. Length: {allItems.Count}");
-    }
-
     public void RebuildBlacklistSet()
     {
         if (!UpdateBlacklist) return;
@@ -213,7 +196,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
             {
                 QuickSell.Logger.LogDebug($"The part afterwards is an operator, continuing to the next part");
             }
-            else
+            else if (!Regex.IsMatch(next, @"[kmbt]"))
             {
                 QuickSell.Logger.LogDebug($"The next part is not an operator, adding \"+\"");
                 expression += "+";
@@ -251,6 +234,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
                     else if (j == 'b') numString += "*1000000000";
                     else if (j == 't') numString += "*1000000000000";
                     else return null;
+                    return numString;
                 }
             }
         }
@@ -436,13 +420,14 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 public class SellCommand : Command
 {
     public override string Name => "Sell";
-    public override string Description => "Sells items, use /sell help to see available uses." +
+    public override string Description => "Sells items, use \"/sell help\" to see available uses." +
         "If you find any bugs, inaccuracies or have any improvements in mind please open an issue on github (the link is on the QuickSell's modpage).";
     public override string[] Syntax => ["", "help [flags]", "item [item]", "{ quota | all } [-a]", "<value> [-o] [-t] [-a] [-n]"];
 
     protected struct SellData()
     {
         // Values
+        public string originalCommand = "";
         public string[] args = [];  // All original arguments given with the command
         public DepositItemsDesk desk = new();  // Desk at the company
         public string variation = "";  // The command variation
@@ -487,7 +472,11 @@ public class SellCommand : Command
         QuickSell.Logger.LogDebug("The sell command was initiated");
         _ = "";
 
-        sellData = new() { args = args };
+        sellData = new()
+        {
+            args = args,
+            originalCommand = "/sell " + args.Join(delimiter: " ")
+        };
 
         // Parse the variation and the flags from the arguments
         ParseArguments(QuickSell.Instance.flagPrefixSanitized);
@@ -538,7 +527,7 @@ public class SellCommand : Command
 
         if (!OpenDoor(out int itemCount, out int totalValue)) return;
 
-        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}", "SELL RESULTS");
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(totalValue)}", "QUICKSELL");
     }
 
     protected static void SellHelp()
@@ -829,7 +818,7 @@ public class SellCommand : Command
             sellData.desk.SetTimesHeardNoiseServerRpc(5f);
         }
 
-        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}", "SELL RESULTS");
+        QuickSell.FancyChatDisplay($"Selling {NumberOfItems(itemCount)} named \"{itemName}\" with a total value of {ValueOfItems([.. items])}", "QUICKSELL");
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
     }
@@ -1295,7 +1284,7 @@ public class SellCommand : Command
     }
 
     // Unites the whole (before, while and after) sell process (if there is a resulting value which we need to get) itself after the needed value has been found
-    protected static async void SellForValue()  // Change calculated overtime so it uses actual sold value instead of requested
+    protected static async void SellForValue()
     {
         QuickSell.Logger.LogDebug($"Calling SellForValue({sellData.value})");
 
@@ -1342,6 +1331,8 @@ public class SellCommand : Command
 
         // The printout of the selling results
         QuickSell.FancyChatDisplay(
+            $"Command: {sellData.originalCommand}\n" +
+
             $"Selling {NumberOfItems(itemCount)} with a total value of {ValueOfItems(items)}" +
 
             $"{(
@@ -1361,7 +1352,7 @@ public class SellCommand : Command
                 ? $":\n{(int)(items.Sum(i => i.scrapValue) * StartOfRound.Instance.companyBuyingRate) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
                 : $", sold every {(sellData.a ? "" : "unfiltered ")}item"
             )}",
-            "SELL RESULTS"
+            "QUICKSELL"
         );
 
         QuickSell.Logger.LogDebug("The sell command completed it's job, terminating");
@@ -1909,8 +1900,8 @@ public class DebugCommandD : Command  // Show listed scrap
         {
             if (item == null) continue;
             ChatCommandAPI.ChatCommandAPI.Print($"{item?.name} {item?.scrapValue}");
-            ChatCommandAPI.ChatCommandAPI.Print($"Overall: {Patches.scrapOnShip.Count} items");
         }
+        ChatCommandAPI.ChatCommandAPI.Print($"Overall: {Patches.scrapOnShip.Count} items");
 
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
