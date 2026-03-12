@@ -36,15 +36,20 @@ public class HelperFuncs
 
     public static void ListingAllScrap()
     {
-        Debug.Log("Listing all scrap on level load");
+        QuickSell.Logger.LogDebug("Listing all scrap on level load");
         Patches.scrapOnShip = UnityEngine.Object.FindObjectsOfType<GrabbableObject>().ToList() ?? [];
-        Debug.Log($"There is {Patches.scrapOnShip.Count} scrap on ship");
+        QuickSell.Logger.LogDebug($"There is {Patches.scrapOnShip.Count} scrap on ship");
     }
 
-    public static void AddPresent(GrabbableObject component)
+    public static void AddPresent(GrabbableObject? component)
     {
+        if (component == null)
+        {
+            QuickSell.Logger.LogDebug($"Component is null!!");
+            return;
+        }
         Patches.scrapOnShip.Add(component);
-        Debug.Log($"Added {component.name} worth {component.scrapValue}");
+        QuickSell.Logger.LogDebug($"Added {component.name} worth {component.scrapValue}");
     }
 }
 
@@ -73,6 +78,38 @@ public class Patches
         }
     }
 
+
+    [HarmonyPatch]
+    class ListingGiftsClient
+    {
+        static MethodBase TargetMethod()
+        {
+            var type = AccessTools.TypeByName("GiftBoxItem+<waitForGiftPresentToSpawnOnClient>d__19");
+            return AccessTools.Method(type, "MoveNext");
+        }
+
+        [HarmonyFinalizer]
+        static Exception Finalizer(Exception __exception, object __instance)
+        {
+            try
+            {
+                var stateType = __instance.GetType();
+                var netObjectField = stateType.GetField("<netObject>5__2", BindingFlags.NonPublic | BindingFlags.Instance);
+                var netObject = netObjectField?.GetValue(__instance) as NetworkObject;
+                var component = netObject?.GetComponent<GrabbableObject>();
+
+                HelperFuncs.AddPresent(component);
+            }
+            catch (Exception e)
+            {
+                QuickSell.Logger.LogError("Finalizer helper failed: " + e);
+            }
+
+            return null!; // suppress the original exception
+        }
+    }
+
+    /*
     [HarmonyPatch]
     public class ListingGiftsClient
     {
@@ -84,30 +121,32 @@ public class Patches
         
         static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
-            var instructionsList = new List<CodeInstruction>(instructions);
+            var instructionList = new List<CodeInstruction>(instructions);
 
-            var target = AccessTools.Method(
-                typeof(GameNetcodeStuff.PlayerControllerB),
-                "SetItemInElevator"
+            var targetField = AccessTools.Field(
+                typeof(GrabbableObject),
+                nameof(GrabbableObject.reachedFloorTarget)
             );
 
-            for (int i = 0; i < instructionsList.Count; i++)
+            bool inserted = false;
+            for (int i = 0; i < instructionList.Count; i++)
             {
-                yield return instructionsList[i];
+                yield return instructionList[i];
 
-                if (instructionsList[i].Calls(target))
+                if (!inserted && instructionList[i].opcode == OpCodes.Stloc_2)
                 {
                     yield return new CodeInstruction(OpCodes.Ldloc_2);
-
                     yield return new CodeInstruction(
                         OpCodes.Call,
                         AccessTools.Method(typeof(HelperFuncs), nameof(HelperFuncs.AddPresent))
                     );
+
+                    inserted = true;
                 }
             }
         }
     }
-
+    */
 
     [HarmonyPatch(typeof(GiftBoxItem), nameof(GiftBoxItem.OpenGiftBoxServerRpc))]
     public class ListingGiftsServer
@@ -194,7 +233,8 @@ public class Patches
 
 
     }
-    
+
+    /*
     // I don't remember what it's really for but if I wrote it, maybe it's needed for something; maybe I'll delete it in the future
     [HarmonyPatch(typeof(StartOfRound), "SyncShipUnlockablesClientRpc")]
     public static class FixItemSaveDataMismatch
@@ -210,15 +250,16 @@ public class Patches
                 int expected = objs.Count(o => o.itemProperties.saveItemVariable);
                 if (itemSaveData.Length < expected)
                 {
-                    Debug.LogWarning($"ItemSaveData length mismatch: {itemSaveData.Length} < {expected}. Truncating.");
+                    QuickSell.Logger.LogWarning($"ItemSaveData length mismatch: {itemSaveData.Length} < {expected}. Truncating.");
                 }
             }
             catch (Exception e)
             {
-                Debug.LogError($"[Patch] Error checking itemSaveData length: {e}");
+                QuickSell.Logger.LogError($"[Patch] Error checking itemSaveData length: {e}");
             }
         }
     }
+    */
 
     // [HarmonyPatch(typeof(MenuManager), "Start")]
     public static class NoWrongVersionPopup
@@ -270,7 +311,7 @@ public class Patches
     {
         static void Postfix(MenuManager __instance)
         {
-            Debug.Log("Trying to create notification");
+            QuickSell.Logger.LogDebug("Trying to create notification");
             __instance.DisplayMenuNotification("Some placeholder info", "[ OK ]");
             var canvas = UnityEngine.Object
                 .FindObjectsOfType<Canvas>(true)
@@ -278,7 +319,7 @@ public class Patches
 
             if (canvas == null)
             {
-                Debug.Log("Canvas is null, shutting down");
+                QuickSell.Logger.LogDebug("Canvas is null, shutting down");
                 return;
             }
 
@@ -290,7 +331,7 @@ public class Patches
 
             if (panel == null)
             {
-                Debug.Log("Panel is null");
+                QuickSell.Logger.LogDebug("Panel is null");
                 return;
             }
 
@@ -304,7 +345,7 @@ public class Patches
                 image.sizeDelta.y * 2.5f
             );
 
-            Debug.Log("Panel resized successfully");
+            QuickSell.Logger.LogDebug("Panel resized successfully");
         }
     }
 

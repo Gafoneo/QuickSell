@@ -104,7 +104,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
     public void RebuildBlacklistSet()
     {
-        if (!UpdateBlacklist) return;
+        if (!UpdateBlacklist)
         QuickSell.Logger.LogDebug($"Constructing a new blacklist");
         QuickSell.Logger.LogDebug($"Old blacklist set: {string.Join(",", ItemBlacklistSet)}");
         ItemBlacklistSet = CommaSplit(itemBlacklistConfig.Value);
@@ -1356,7 +1356,7 @@ public class SellCommand : Command
             $"{(
                 sellData.originalValue != ""
                 ? $":\n{(int)(items.Sum(i => i.scrapValue) * StartOfRound.Instance.companyBuyingRate) + calculatedOvertime + sellData.existingMoney} sold / {sellData.originalValue} requested"
-                : $", sold every {(sellData.a ? "" : "unfiltered ")}item"
+                : $", sold every {(sellData.a ? "" : "unblacklisted ")}item"
             )}",
             "QUICKSELL"
         );
