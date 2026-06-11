@@ -1864,7 +1864,6 @@ public class DebugCommandC : Command  // Gift boxes
             }
             if (item.itemProperties.syncGrabFunction)
             {
-                item.isSendingItemRPC++;
                 item.GrabServerRpc();
             }
 
