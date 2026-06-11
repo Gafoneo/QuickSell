@@ -39,7 +39,7 @@
       IncludeAssets="compile"
       PrivateAssets="all"
     />
-    <PackageReference Include="baer1.ChatCommandAPI" Version="0.2.*" />
+    <PackageReference Include="baer1.ChatCommandAPI" Version="*" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework.TrimEnd(`0123456789`))' == 'net'">
     <PackageReference
