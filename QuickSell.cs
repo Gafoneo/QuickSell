@@ -1,7 +1,7 @@
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using ChatCommandAPI;
+using ChatCommandAPI.Utils;
 using EasyTextEffects.Editor.MyBoxCopy.Extensions;
 using HarmonyLib;
 using System;
@@ -9,11 +9,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEngine;
 using static BepInEx.BepInDependency;
 using Object = UnityEngine.Object;
+using CommandChat = ChatCommandAPI.Utils.Chat;
 
 
 namespace QuickSell;
@@ -146,7 +148,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
     public static void ParseFlags(ref string[] args, out string flags, char flagPrefix = '-')
     {
-        if (!QuickSell.Instance.isFlagPrefixCorrect) ChatCommandAPI.ChatCommandAPI.PrintError("User-inputted flag prefix was not convertable into a single symbol, it's probably not a single symbol or an invalid one. For now \"-\" flag prefix will be assumed");
+        if (!QuickSell.Instance.isFlagPrefixCorrect) CommandChat.PrintError("User-inputted flag prefix was not convertable into a single symbol, it's probably not a single symbol or an invalid one. For now \"-\" flag prefix will be assumed");
 
         flags = string.Join("", args.Where(i => i != "" && i.First() == flagPrefix && i.Length > 1).Select(i => i[1..]));
         args = [.. args.Where(i => i != "" && !(i.First() == flagPrefix && i.Length > 1))];
@@ -176,7 +178,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
             part = PartProcessing(ref dividedExpression, i);
             if (part == null)
             {
-                ChatCommandAPI.ChatCommandAPI.PrintError($"Part \"{dividedExpression[i]}\" was unable to be processed, terminating");
+                CommandChat.PrintError($"Part \"{dividedExpression[i]}\" was unable to be processed, terminating");
                 return null;
             }
             if (part.IsNullOrEmpty()) continue;
@@ -351,7 +353,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         catch
         {
             QuickSell.Logger.LogDebug("Failed to evalute expression");
-            ChatCommandAPI.ChatCommandAPI.PrintError("Failed to evalute expression");
+            CommandChat.PrintError("Failed to evalute expression");
             return false;
         }
 
@@ -361,7 +363,7 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
         if (!double.TryParse(evaluatedExpression, out double preValue))
         {
             QuickSell.Logger.LogDebug($"The value {evaluatedExpression} is not convertable into double");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"The value {evaluatedExpression} is not convertable into double");
+            CommandChat.PrintError($"The value {evaluatedExpression} is not convertable into double");
             return false;
         }
 
@@ -423,7 +425,32 @@ public class QuickSell : BaseUnityPlugin  // Add ability to write temporary blac
 
 }
 
-public class SellCommand : Command
+public abstract class QuickSellCommand : ChatCommandAPI.Command
+{
+    public virtual string[] Commands => [Name.ToLowerInvariant()];
+    public sealed override string Command => Commands[0];
+    public sealed override string[] Aliases => Commands.Skip(1).ToArray();
+
+    public sealed override void Invoke(string args)
+    {
+        string[] parsedArgs;
+        try
+        {
+            parsedArgs = Args.Parse(args).ToArray();
+        }
+        catch (ChatCommandAPI.InvalidArgumentsException)
+        {
+            throw new ChatCommandAPI.CommandException("Invalid arguments.");
+        }
+
+        if (!InvokeParsed(parsedArgs, out var error))
+            throw new ChatCommandAPI.CommandException(error ?? "Command failed.");
+    }
+
+    protected abstract bool InvokeParsed(string[] args, out string? error);
+}
+
+public class SellCommand : QuickSellCommand
 {
     public override string Name => "Sell";
     public override string Description => "Sells items, use \"/sell help\" to see available uses." +
@@ -473,7 +500,7 @@ public class SellCommand : Command
 
     protected static SellData sellData;
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string _)
+    protected override bool InvokeParsed(string[] args, out string? _)
     {
         QuickSell.Logger.LogDebug("The sell command was initiated");
         _ = "";
@@ -506,7 +533,7 @@ public class SellCommand : Command
         sellData.a = flags.Contains("a");
         sellData.n = flags.Contains("n");
         sellData.p = flags.Contains("p");
-        if (flags.Contains("t")) ChatCommandAPI.ChatCommandAPI.PrintError("Flag -t as a check for existing money will be depricated soon. Use -e instead");
+        if (flags.Contains("t")) CommandChat.PrintError("Flag -t as a check for existing money will be depricated soon. Use -e instead");
         QuickSell.Logger.LogDebug($"Flags: -e == {sellData.e}; -o == {sellData.o}; -a == {sellData.a}; -n == {sellData.n}; -p == {sellData.p}");
 
         if (sellData.args.Length == 0) return;
@@ -778,7 +805,7 @@ public class SellCommand : Command
                 return;
         }
 
-        ChatCommandAPI.ChatCommandAPI.PrintError("No page with this name exists");
+        CommandChat.PrintError("No page with this name exists");
     }
 
     protected static void SellParticularItem()
@@ -804,7 +831,7 @@ public class SellCommand : Command
         if (items == null || items.Count == 0)
         {
             QuickSell.Logger.LogDebug("No items were found");
-            ChatCommandAPI.ChatCommandAPI.PrintError("No items were found");
+            CommandChat.PrintError("No items were found");
             return;
         }
 
@@ -812,7 +839,7 @@ public class SellCommand : Command
         if (items == null || items.Count == 0)
         {
             QuickSell.Logger.LogDebug($"No items called \"{itemName}\" were detected");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"No items called \"{itemName}\" were detected");
+            CommandChat.PrintError($"No items called \"{itemName}\" were detected");
             return;
         }
 
@@ -865,7 +892,7 @@ public class SellCommand : Command
         if (sellData.value <= 0)
         {
             QuickSell.Logger.LogDebug("The value must be positive");
-            ChatCommandAPI.ChatCommandAPI.PrintError("The value must be positive");
+            CommandChat.PrintError("The value must be positive");
             return;
         }
 
@@ -880,7 +907,7 @@ public class SellCommand : Command
             var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
             if (terminal == null)
             {
-                ChatCommandAPI.ChatCommandAPI.PrintError("Cannot find terminal!");
+                CommandChat.PrintError("Cannot find terminal!");
                 QuickSell.Logger.LogDebug($"Cannot find terminal!");
                 return;
             }
@@ -960,7 +987,7 @@ public class SellCommand : Command
             if (sellData.p)
             {
                 QuickSell.Logger.LogDebug($"Denied request to empty permanent blacklist");
-                ChatCommandAPI.ChatCommandAPI.PrintError($"The permanent blacklist cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
+                CommandChat.PrintError($"The permanent blacklist cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
                 return;
             }
 
@@ -973,7 +1000,7 @@ public class SellCommand : Command
         else
         {
             QuickSell.Logger.LogDebug($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
+            CommandChat.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help blacklist\"");
             return;
         }
 
@@ -998,14 +1025,14 @@ public class SellCommand : Command
         if (actualItemName == "")
         {
             QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            CommandChat.PrintError($"Wrong item name");
             return;
         }
 
         if (add && QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent blacklist");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already in the permanent blacklist");
             return;
         }
         else if (add)
@@ -1017,7 +1044,7 @@ public class SellCommand : Command
         else if (!QuickSell.Instance.ItemBlacklistSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent blacklist");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is not in the permanent blacklist");
             return;
         }
         else
@@ -1041,14 +1068,14 @@ public class SellCommand : Command
         if (actualItemName == "")
         {
             QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            CommandChat.PrintError($"Wrong item name");
             return;
         }
 
         if (add && QuickSell.Instance.TempBlacklistAddSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily blacklisted");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily blacklisted");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already temporarily blacklisted");
             return;
         }
         else if (add)
@@ -1061,7 +1088,7 @@ public class SellCommand : Command
         else if (QuickSell.Instance.TempBlacklistRmSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily prohibited to blacklist");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to blacklist");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to blacklist");
             return;
         }
         else
@@ -1105,7 +1132,7 @@ public class SellCommand : Command
             if (sellData.p)
             {
                 QuickSell.Logger.LogDebug($"Denied request to empty permanent priority set");
-                ChatCommandAPI.ChatCommandAPI.PrintError($"The permanent priority set cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
+                CommandChat.PrintError($"The permanent priority set cannot be emptied by the mod itself for safety reasons. If you really want to do it use something like LethalConfig or R2Modman config editor");
                 return;
             }
 
@@ -1118,7 +1145,7 @@ public class SellCommand : Command
         else
         {
             QuickSell.Logger.LogDebug($"Wrong arguments. If you don't know how to use the command use \"/sell help priority\"");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help priority\"");
+            CommandChat.PrintError($"Wrong arguments. If you don't know how to use the command use \"/sell help priority\"");
             return;
         }
 
@@ -1143,14 +1170,14 @@ public class SellCommand : Command
         if (actualItemName == "")
         {
             QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            CommandChat.PrintError($"Wrong item name");
             return;
         }
 
         if (add && QuickSell.Instance.PriorityItemsSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the permanent priority set");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the permanent priority set");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already in the permanent priority set");
             return;
         }
         else if (add)
@@ -1162,7 +1189,7 @@ public class SellCommand : Command
         else if (!QuickSell.Instance.PriorityItemsSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is not in the permanent priority set");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is not in the permanent priority set");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is not in the permanent priority set");
             return;
         }
         else
@@ -1186,14 +1213,14 @@ public class SellCommand : Command
         if (actualItemName == "")
         {
             QuickSell.Logger.LogDebug($"Wrong item name");
-            ChatCommandAPI.ChatCommandAPI.PrintError($"Wrong item name");
+            CommandChat.PrintError($"Wrong item name");
             return;
         }
 
         if (add && QuickSell.Instance.TempPriorityAddSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already in the temporarily priority set");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already in the temporarily priority set");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already in the temporarily priority set");
             return;
         }
         else if (add)
@@ -1206,7 +1233,7 @@ public class SellCommand : Command
         else if (QuickSell.Instance.TempPriorityRmSet.Contains(actualItemName))
         {
             QuickSell.Logger.LogDebug($"\"{actualItemName}\" is already temporarily prohibited to prioritize");
-            ChatCommandAPI.ChatCommandAPI.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to prioritize");
+            CommandChat.PrintWarning($"\"{actualItemName}\" is already temporarily prohibited to prioritize");
             return;
         }
         else
@@ -1272,7 +1299,7 @@ public class SellCommand : Command
         if (player == null)
         {
             QuickSell.Logger.LogDebug("localPlayerController == null -> returning false");
-            ChatCommandAPI.ChatCommandAPI.PrintError("localPlayerController == null");
+            CommandChat.PrintError("localPlayerController == null");
             return false;
         }
 
@@ -1281,7 +1308,7 @@ public class SellCommand : Command
         if (heldItem == null || heldItem.name == "")
         {
             QuickSell.Logger.LogDebug("No item is held and no item was specified");
-            ChatCommandAPI.ChatCommandAPI.PrintError("No item is held and no item was specified");
+            CommandChat.PrintError("No item is held and no item was specified");
             return false;
         }
 
@@ -1298,21 +1325,21 @@ public class SellCommand : Command
         if (items == null)
         {
             QuickSell.Logger.LogDebug("Got null from ItemsForValue() -> not selling anything");
-            ChatCommandAPI.ChatCommandAPI.PrintError("No items were found");
+            CommandChat.PrintError("No items were found");
             return;
         }
 
         if (items.Count == 0)
         {
             QuickSell.Logger.LogDebug("The list of items you need to sell is empty so you probably can't afford the amount you requested. If not, please report this.");
-            ChatCommandAPI.ChatCommandAPI.PrintError("You can't afford to sell that amount");
+            CommandChat.PrintError("You can't afford to sell that amount");
             return;
         }
 
         if (!SellItems(items, out int itemCount))
         {
             QuickSell.Logger.LogDebug("Error selling items");
-            ChatCommandAPI.ChatCommandAPI.PrintError("Error selling items");
+            CommandChat.PrintError("Error selling items");
             return;
         }
 
@@ -1548,14 +1575,14 @@ public class SellCommand : Command
         if (itemCount == 0)
         {
             QuickSell.Logger.LogDebug("No items on the desk");
-            ChatCommandAPI.ChatCommandAPI.PrintError("No items on the desk");
+            CommandChat.PrintError("No items on the desk");
             return false;
         }
         
         if (sellData.desk.doorOpen)
         {
             QuickSell.Logger.LogDebug("Door was already open -> nothing left to do");
-            ChatCommandAPI.ChatCommandAPI.PrintError("Door already open");
+            CommandChat.PrintError("Door already open");
             return false;
         }
 
@@ -1692,7 +1719,7 @@ public class SellCommand : Command
         if (GameNetworkManager.Instance == null || desk == null)
         {
             QuickSell.Logger.LogDebug("A desk was not found");
-            ChatCommandAPI.ChatCommandAPI.PrintError("A desk was not found");
+            CommandChat.PrintError("A desk was not found");
             return false;
         }
 
@@ -1701,7 +1728,7 @@ public class SellCommand : Command
     }
 }
 
-public class OvertimeCommand : Command
+public class OvertimeCommand : QuickSellCommand
 {
     public override string Name => "Overtime";
     public override string Description => "Shows how much overtime you will get\n" +
@@ -1709,7 +1736,7 @@ public class OvertimeCommand : Command
     public override string[] Commands => [Name.ToLower(), "ot"];
     public override string[] Syntax => ["", "[<amount>] [-n]"];
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    protected override bool InvokeParsed(string[] args, out string? error)
     {
         QuickSell.Logger.LogDebug($"The overtime command was initiated");
 
@@ -1717,7 +1744,7 @@ public class OvertimeCommand : Command
         var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
         if (terminal == null)
         {
-            ChatCommandAPI.ChatCommandAPI.PrintError("Cannot find terminal!");
+            CommandChat.PrintError("Cannot find terminal!");
             QuickSell.Logger.LogDebug($"Cannot find terminal!");
             return false;
         }
@@ -1752,14 +1779,14 @@ public class OvertimeCommand : Command
 }
 
 #if DEBUG
-public class DebugCommandA : Command  // All items on the map
+public class DebugCommandA : QuickSellCommand  // All items on the map
 {
     public override string Name => "DebugA";
     public override string Description => "Some debug command";
     public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    protected override bool InvokeParsed(string[] args, out string? error)
     {
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
@@ -1773,7 +1800,7 @@ public class DebugCommandA : Command  // All items on the map
                 string name = item.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "";
                 if (name == args[0])
                 {
-                    ChatCommandAPI.ChatCommandAPI.Print(item.grabbable ? "true" : "false");
+                    CommandChat.Print(item.grabbable ? "true" : "false");
                 }
             }
         }
@@ -1784,7 +1811,7 @@ public class DebugCommandA : Command  // All items on the map
                 string name = item.GetComponentInChildren<ScanNodeProperties>()?.headerText ?? "";
                 if (item.grabbable && item.itemProperties.isScrap && item.scrapValue > 0)
                 {
-                    ChatCommandAPI.ChatCommandAPI.Print($"{name} worth {item.scrapValue} is grabbable!");
+                    CommandChat.Print($"{name} worth {item.scrapValue} is grabbable!");
                 }
             }
         }
@@ -1794,14 +1821,14 @@ public class DebugCommandA : Command  // All items on the map
     }
 }
 
-public class DebugCommandB : Command  // 2 FPS
+public class DebugCommandB : QuickSellCommand  // 2 FPS
 {
     public override string Name => "DebugB";
     public override string Description => "Some debug command";
     public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    protected override bool InvokeParsed(string[] args, out string? error)
     {
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
@@ -1817,14 +1844,14 @@ public class DebugCommandB : Command  // 2 FPS
 }
 
 // WIP
-public class DebugCommandC : Command  // Gift boxes
+public class DebugCommandC : QuickSellCommand  // Gift boxes
 {
     public override string Name => "DebugC";
     public override string Description => "Some debug command";
     public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    protected override bool InvokeParsed(string[] args, out string? error)
     {
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
@@ -1864,7 +1891,7 @@ public class DebugCommandC : Command  // Gift boxes
             }
             if (item.itemProperties.syncGrabFunction)
             {
-                item.isSendingItemRPC++;
+                TryIncrementIsSendingItemRpc(item);
                 item.GrabServerRpc();
             }
 
@@ -1888,16 +1915,25 @@ public class DebugCommandC : Command  // Gift boxes
 
         QuickSell.Instance.openingGifts = false;
     }
+
+    private static void TryIncrementIsSendingItemRpc(GiftBoxItem item)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var field = typeof(GrabbableObject).GetField("isSendingItemRPC", flags)
+            ?? item.GetType().GetField("isSendingItemRPC", flags);
+        if (field?.FieldType == typeof(int))
+            field.SetValue(item, (int)field.GetValue(item) + 1);
+    }
 }
 
-public class DebugCommandD : Command  // Show listed scrap
+public class DebugCommandD : QuickSellCommand  // Show listed scrap
 {
     public override string Name => "DebugD";
     public override string Description => "Some debug command";
     public override string[] Commands => [Name.ToLower()];
     public override string[] Syntax => [""];
 
-    public override bool Invoke(string[] args, Dictionary<string, string> kwargs, out string error)
+    protected override bool InvokeParsed(string[] args, out string? error)
     {
         QuickSell.Logger.LogDebug($"The debug command was initiated");
         error = "it should not happen";
@@ -1905,9 +1941,9 @@ public class DebugCommandD : Command  // Show listed scrap
         foreach (var item in Patches.scrapOnShip)
         {
             if (item == null) continue;
-            ChatCommandAPI.ChatCommandAPI.Print($"{item?.name} {item?.scrapValue}");
+            CommandChat.Print($"{item?.name} {item?.scrapValue}");
         }
-        ChatCommandAPI.ChatCommandAPI.Print($"Overall: {Patches.scrapOnShip.Count} items");
+        CommandChat.Print($"Overall: {Patches.scrapOnShip.Count} items");
 
         QuickSell.Logger.LogDebug($"Terminating");
         return true;
