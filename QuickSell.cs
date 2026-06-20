@@ -482,7 +482,7 @@ public class SellCommand : Command
         sellData = new()
         {
             args = Args.Parse(args).ToArray(),
-            originalCommand = "/sell " + args.Join(delimiter: " ")
+            originalCommand = "/sell " + args.Join(delimiter: "")
         };
 
         // Parse the variation and the flags from the arguments
